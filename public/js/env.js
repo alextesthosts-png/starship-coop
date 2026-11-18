@@ -2,6 +2,7 @@
 import * as THREE from 'three';
 import { PLANET, terrainHeight, TOWERS, asteroids, CONVOY, DREAD, insideBox, mulberry32 } from '/shared/world.js';
 import { mat, buildDreadnought, buildJumpGate } from './models.js';
+import { terrainMaterial, triplanarMaterial } from './textures.js';
 
 function skyDome(top, horizon, sunDir, sunColor) {
   const geo = new THREE.SphereGeometry(20000, 32, 16);
@@ -115,14 +116,14 @@ export function buildPlanetEnv(scene) {
   }
   geo.setAttribute('color', new THREE.BufferAttribute(colors, 3));
   geo.computeVertexNormals();
-  const terrain = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({ vertexColors: true, flatShading: true, roughness: 0.95, metalness: 0 }));
+  const terrain = new THREE.Mesh(geo, terrainMaterial());
   scene.add(terrain);
 
   // rock spires
   const rng = mulberry32(5);
   const spireGeo = new THREE.CylinderGeometry(0.35, 1, 1, 6);
   const N = 140;
-  const spires = new THREE.InstancedMesh(spireGeo, mat(0x9a6a48, { rough: 0.95, metal: 0 }), N);
+  const spires = new THREE.InstancedMesh(spireGeo, triplanarMaterial({ albedo: 'terrain_cliff_albedo', normal: 'terrain_cliff_normal', scale: 0.012, color: 0xd8b8a0, metalness: 0, roughness: 0.95, normalStrength: 1.2 }), N);
   const m4 = new THREE.Matrix4(), q = new THREE.Quaternion(), s = new THREE.Vector3(), p = new THREE.Vector3();
   let k = 0;
   while (k < N) {
@@ -139,7 +140,8 @@ export function buildPlanetEnv(scene) {
   scene.add(spires);
 
   // base structures (landing pads, bunkers) - towers themselves are entities
-  const padM = mat(0x6a6e76, { metal: 0.3, rough: 0.7 });
+  const padM = triplanarMaterial({ albedo: 'hull_panels_albedo', normal: 'hull_panels_normal', scale: 0.02, color: 0xb8b4ac, metalness: 0.3, roughness: 0.7 });
+  const bunkerM = triplanarMaterial({ albedo: 'hull_panels_albedo', normal: 'hull_panels_normal', scale: 0.03, color: 0xd8ccb8, metalness: 0.2, roughness: 0.8 });
   const lineM = new THREE.MeshBasicMaterial({ color: 0xffcc55 });
   for (const [x, z] of [[0, 0], [-420, 120], [380, 60]]) {
     const pad = new THREE.Mesh(new THREE.CylinderGeometry(70, 75, 6, 16), padM);
@@ -152,7 +154,7 @@ export function buildPlanetEnv(scene) {
   }
   for (let i = 0; i < 12; i++) {
     const a = rng() * Math.PI * 2, r = 150 + rng() * 300;
-    const b = new THREE.Mesh(new THREE.BoxGeometry(30 + rng() * 40, 15 + rng() * 20, 30 + rng() * 40), mat(0xb0a898, { rough: 0.8 }));
+    const b = new THREE.Mesh(new THREE.BoxGeometry(30 + rng() * 40, 15 + rng() * 20, 30 + rng() * 40), bunkerM);
     b.position.set(Math.cos(a) * r, PLANET.baseHeight + 8, Math.sin(a) * r);
     b.rotation.y = rng() * 3;
     scene.add(b);
@@ -209,7 +211,7 @@ export function buildSpaceEnv(scene, missionId) {
       g.computeVertexNormals();
       return g;
     });
-    const astMat = mat(0x7a6a5e, { rough: 0.95, metal: 0.05 });
+    const astMat = triplanarMaterial({ albedo: 'asteroid_albedo', normal: 'asteroid_normal', scale: 0.02, color: 0xe8dcd0, metalness: 0.05, roughness: 0.9, normalStrength: 1.5 });
     for (let v = 0; v < 3; v++) {
       const subset = list.filter((a) => a.s === v);
       const im = new THREE.InstancedMesh(geos[v], astMat, subset.length);

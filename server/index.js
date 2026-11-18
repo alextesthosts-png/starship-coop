@@ -14,7 +14,7 @@ const TICK = 1 / 30;
 
 const MIME = {
   '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8',
-  '.json': 'application/json', '.png': 'image/png', '.svg': 'image/svg+xml', '.ico': 'image/x-icon', '.woff2': 'font/woff2',
+  '.json': 'application/json', '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.svg': 'image/svg+xml', '.ico': 'image/x-icon', '.woff2': 'font/woff2',
 };
 const STATIC = [
   { prefix: '/vendor/three/', dir: path.join(ROOT, 'node_modules/three'), allow: ['build/', 'examples/jsm/'] },
@@ -284,7 +284,7 @@ const server = http.createServer((req, res) => {
       const ext = path.extname(file);
       res.writeHead(200, {
         'content-type': MIME[ext] || 'application/octet-stream',
-        'cache-control': s.prefix === '/vendor/three/' ? 'public, max-age=86400' : 'no-cache',
+        'cache-control': s.prefix === '/vendor/three/' || ext === '.jpg' ? 'public, max-age=86400' : 'no-cache',
       });
       fs.createReadStream(file).pipe(res);
     });

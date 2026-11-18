@@ -6,6 +6,7 @@ import { Sfx } from './audio.js';
 import { Hud, esc } from './hud.js';
 import { Input } from './input.js';
 import { Game } from './game.js';
+import { setAnisotropy } from './textures.js';
 
 const $ = (id) => document.getElementById(id);
 const show = (id, on = true) => $(id).classList.toggle('hidden', !on);
@@ -30,6 +31,7 @@ renderer.setSize(window.innerWidth, window.innerHeight, false);
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
 renderer.toneMappingExposure = 1.0;
 renderer.outputColorSpace = THREE.SRGBColorSpace;
+setAnisotropy(renderer.capabilities.getMaxAnisotropy());
 const hud = new Hud();
 const input = new Input(canvas);
 

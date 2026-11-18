@@ -1,6 +1,7 @@
 // Procedural low-poly models (original designs). All ships face -Z.
 import * as THREE from 'three';
 import { DREAD, mulberry32 } from '/shared/world.js';
+import { panelMaterial, triplanarMaterial } from './textures.js';
 
 const matCache = new Map();
 export function mat(color, { emissive = 0x000000, ei = 1, metal = 0.35, rough = 0.55, flat = true, transparent = false, opacity = 1 } = {}) {
@@ -57,9 +58,9 @@ function wedge(w, h, l, taper = 0.3) {
 // ---------------- player ships ----------------
 export function buildShip(type, color) {
   const g = new THREE.Group();
-  const accent = mat(color, { metal: 0.4, rough: 0.4 });
-  const hullM = mat(0xc9ced6, { metal: 0.5, rough: 0.45 });
-  const darkM = mat(0x2a2f38, { metal: 0.6, rough: 0.5 });
+  const accent = panelMaterial(color, { metalness: 0.4, roughness: 0.4 });
+  const hullM = panelMaterial(0xd6dbe2, { metalness: 0.5, roughness: 0.45 });
+  const darkM = panelMaterial(0x50565f, { metalness: 0.6, roughness: 0.5, repeat: 2 });
   const canopy = mat(0x10243a, { emissive: 0x2a7fff, ei: 0.35, metal: 0.9, rough: 0.15 });
   const engines = [];
   if (type === 'lancer') {
@@ -113,9 +114,9 @@ const ENEMY_RED = 0xd8322f;
 export function buildEntity(type) {
   const g = new THREE.Group();
   const engines = [];
-  const dark = mat(0x3a3236, { metal: 0.6, rough: 0.45 });
-  const red = mat(ENEMY_RED, { metal: 0.3, rough: 0.5 });
-  const steel = mat(0x8a8f99, { metal: 0.6, rough: 0.4 });
+  const dark = panelMaterial(0x6a5c62, { metalness: 0.6, roughness: 0.45 });
+  const red = panelMaterial(ENEMY_RED, { metalness: 0.3, roughness: 0.5 });
+  const steel = panelMaterial(0xaab0ba, { metalness: 0.6, roughness: 0.4 });
   if (type === 'raider' || type === 'bomber') {
     const sc = type === 'bomber' ? 1.45 : 1;
     // forked "pincer" fighter
@@ -143,13 +144,13 @@ export function buildEntity(type) {
     const vent = mesh(new THREE.PlaneGeometry(8, 14), glow(0xff3010, 1.4), [0, -3.05, 2], [Math.PI / 2, 0, 0]);
     g.add(vent);
   } else if (type === 'freighter') {
-    g.add(mesh(new THREE.BoxGeometry(18, 14, 70), dark, [0, 0, 0]));
+    g.add(mesh(new THREE.BoxGeometry(18, 14, 70), triplanarMaterial({ albedo: 'hull_panels_albedo', normal: 'hull_panels_normal', scale: 0.06, color: 0x7a6e72, metalness: 0.5, roughness: 0.5 }), [0, 0, 0]));
     g.add(mesh(new THREE.BoxGeometry(10, 8, 14), steel, [0, 6, -38]));
     g.add(mesh(new THREE.BoxGeometry(14, 4, 6), mat(0x1a1010, { emissive: 0xffaa55, ei: 0.6 }), [0, 9, -42]));
     const rng = mulberry32(42);
     for (let i = 0; i < 8; i++) {
       const s = i % 2 ? 1 : -1;
-      g.add(mesh(new THREE.BoxGeometry(9, 9, 12), mat([0x8a3a2a, 0x5a5f6a, 0x7a6a3a][Math.floor(rng() * 3)], { metal: 0.3 }), [s * 13, rng() * 4 - 2, -24 + Math.floor(i / 2) * 15]));
+      g.add(mesh(new THREE.BoxGeometry(9, 9, 12), panelMaterial([0xc06a50, 0x8a95a8, 0xb8a060][Math.floor(rng() * 3)], { metalness: 0.3, roughness: 0.6 }), [s * 13, rng() * 4 - 2, -24 + Math.floor(i / 2) * 15]));
     }
     g.add(mesh(new THREE.CylinderGeometry(8, 9, 10, 10), steel, [0, 0, 40], [Math.PI / 2, 0, 0]));
     const eg = engineGlow(0xff7733, 22); eg.position.set(0, 0, 47); g.add(eg); engines.push(eg);
@@ -178,7 +179,7 @@ export function buildEntity(type) {
   } else if (type === 'tower') {
     const blue = mat(0x2a6aa8, { metal: 0.5 });
     g.add(mesh(new THREE.CylinderGeometry(22, 26, 8, 8), steel, [0, -45, 0]));
-    g.add(mesh(new THREE.CylinderGeometry(5, 9, 80, 8), mat(0xd0d4da, { metal: 0.4 }), [0, -5, 0]));
+    g.add(mesh(new THREE.CylinderGeometry(5, 9, 80, 8), panelMaterial(0xe0e4ea, { metalness: 0.4, repeat: 3 }), [0, -5, 0]));
     g.add(mesh(new THREE.CylinderGeometry(10, 10, 6, 8), blue, [0, 20, 0]));
     const dish = mesh(new THREE.SphereGeometry(12, 12, 6, 0, Math.PI * 2, 0, Math.PI / 3), mat(0xe0e4ea, { metal: 0.3, flat: false }), [0, 34, 0], [Math.PI, 0, 0]);
     g.add(dish);
@@ -195,9 +196,9 @@ export function buildEntity(type) {
 // ---------------- capital ship ----------------
 export function buildDreadnought() {
   const g = new THREE.Group();
-  const hullM = mat(0x9aa0aa, { metal: 0.45, rough: 0.55 });
-  const darkM = mat(0x5a5e66, { metal: 0.6, rough: 0.6 });
-  const redM = mat(0x7a2020, { metal: 0.4 });
+  const hullM = triplanarMaterial({ albedo: 'hull_panels_albedo', normal: 'hull_panels_normal', scale: 0.018, color: 0xb0b4bc, metalness: 0.5, roughness: 0.55, normalStrength: 1.2 });
+  const darkM = triplanarMaterial({ albedo: 'hull_panels_albedo', normal: 'hull_panels_normal', scale: 0.07, color: 0x6a6e76, metalness: 0.6, roughness: 0.6 });
+  const redM = triplanarMaterial({ albedo: 'hull_panels_albedo', normal: 'hull_panels_normal', scale: 0.07, color: 0xa03030, metalness: 0.4, roughness: 0.5 });
   const winM = glow(0xffd28a, 1.6);
   const rng = mulberry32(99);
   for (const b of DREAD.hull) {
@@ -232,7 +233,7 @@ export function buildDreadnought() {
 
 export function buildJumpGate() {
   const g = new THREE.Group();
-  g.add(mesh(new THREE.TorusGeometry(260, 22, 8, 40), mat(0x6a6f7a, { metal: 0.7 })));
+  g.add(mesh(new THREE.TorusGeometry(260, 22, 8, 40), triplanarMaterial({ albedo: 'hull_panels_albedo', normal: 'hull_panels_normal', scale: 0.03, color: 0x9aa0aa, metalness: 0.7, roughness: 0.45 })));
   for (let i = 0; i < 8; i++) {
     const a = (i / 8) * Math.PI * 2;
     g.add(mesh(new THREE.BoxGeometry(40, 60, 50), mat(0x3d4048, { metal: 0.6 }), [Math.cos(a) * 270, Math.sin(a) * 270, 0], [0, 0, a]));
