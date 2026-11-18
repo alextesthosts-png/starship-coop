@@ -1,0 +1,159 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Vanguard Wing — Co-op Starfighter</title>
+  <meta name="description" content="A co-op 3D arcade starfighter game in your browser. Fly missions with up to 4 friends." />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@500;700;900&family=Rajdhani:wght@500;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/style.css" />
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><path d='M16 2 L28 28 L16 22 L4 28 Z' fill='%234fc3ff'/></svg>" />
+  <script type="importmap">
+    { "imports": { "three": "/vendor/three/build/three.module.js", "three/addons/": "/vendor/three/examples/jsm/" } }
+  </script>
+</head>
+<body>
+  <canvas id="gl"></canvas>
+
+  <!-- ============ MAIN MENU ============ -->
+  <section id="menu" class="screen">
+    <div class="menu-left">
+      <div class="logo">
+        <div class="logo-top">VANGUARD</div>
+        <div class="logo-bot">WING</div>
+        <div class="logo-sub">co-op arcade starfighter</div>
+      </div>
+      <label class="field">
+        <span>Callsign</span>
+        <input id="name" maxlength="16" placeholder="Your pilot name" autocomplete="off" />
+      </label>
+      <div class="field"><span>Starfighter</span></div>
+      <div id="ship-select" class="ship-select"></div>
+      <div class="menu-buttons">
+        <button id="btn-quick" class="btn primary">Quick Play</button>
+        <button id="btn-create" class="btn">Create Wing</button>
+        <div class="join-row">
+          <input id="join-code" maxlength="4" placeholder="CODE" autocomplete="off" />
+          <button id="btn-join" class="btn">Join</button>
+        </div>
+      </div>
+      <div id="menu-error" class="error"></div>
+      <div class="open-rooms">
+        <div class="sub-h">Open wings <button id="btn-refresh" class="link">refresh</button></div>
+        <div id="room-list"><div class="muted">Looking for wings…</div></div>
+      </div>
+    </div>
+    <div class="menu-right">
+      <div class="controls-card">
+        <div class="sub-h">Flight controls</div>
+        <div class="kb"><kbd>Mouse</kbd> steer (virtual stick)</div>
+        <div class="kb"><kbd>W</kbd>/<kbd>S</kbd> throttle &nbsp; <kbd>A</kbd>/<kbd>D</kbd> roll</div>
+        <div class="kb"><kbd>LMB</kbd>/<kbd>Space</kbd> cannons</div>
+        <div class="kb"><kbd>RMB</kbd>/<kbd>F</kbd> secondary weapon</div>
+        <div class="kb"><kbd>Shift</kbd> boost &nbsp; <kbd>C</kbd> camera</div>
+        <div class="kb"><kbd>T</kbd> target nearest crosshair &nbsp; <kbd>R</kbd> nearest enemy</div>
+        <div class="kb"><kbd>Enter</kbd> chat &nbsp; <kbd>Esc</kbd> menu &nbsp; <kbd>M</kbd> mute</div>
+        <div class="kb muted">Gamepad supported: sticks fly, RT fire, LT/RB secondary, A boost, Y target.</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ LOBBY ============ -->
+  <section id="lobby" class="screen hidden">
+    <div class="lobby-grid">
+      <div class="panel">
+        <div class="panel-h">Wing <span id="room-code" class="code">----</span>
+          <button id="btn-copy" class="link">copy invite link</button>
+        </div>
+        <div id="player-list"></div>
+        <div class="sub-h">Your starfighter</div>
+        <div id="ship-select-lobby" class="ship-select small"></div>
+        <div class="lobby-actions">
+          <button id="btn-ready" class="btn">Ready</button>
+          <button id="btn-start" class="btn primary">Launch Mission</button>
+          <button id="btn-leave" class="btn ghost">Leave</button>
+        </div>
+        <div id="lobby-hint" class="muted"></div>
+      </div>
+      <div class="panel">
+        <div class="panel-h">Mission <span id="host-note" class="muted"></span></div>
+        <div id="mission-list"></div>
+        <div class="row">
+          <label class="field inline"><span>Difficulty</span>
+            <select id="diff"><option value="easy">Cadet</option><option value="normal" selected>Pilot</option><option value="hard">Ace</option></select>
+          </label>
+          <label class="field inline check"><input type="checkbox" id="public" checked /> <span>Listed publicly</span></label>
+        </div>
+        <div id="briefing" class="briefing"></div>
+      </div>
+      <div class="panel chat-panel">
+        <div class="panel-h">Comms</div>
+        <div id="chat-log"></div>
+        <input id="chat-input" maxlength="140" placeholder="Say something… (Enter)" autocomplete="off" />
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ DEBRIEF ============ -->
+  <section id="debrief" class="screen hidden">
+    <div class="panel debrief-panel">
+      <div id="deb-title" class="deb-title"></div>
+      <div id="deb-reason" class="muted"></div>
+      <div id="deb-medal" class="medal"></div>
+      <div id="deb-obj"></div>
+      <table id="deb-stats"></table>
+      <button id="btn-deb-continue" class="btn primary">Back to Hangar</button>
+    </div>
+  </section>
+
+  <!-- ============ HUD ============ -->
+  <div id="hud" class="hidden">
+    <canvas id="hud-canvas"></canvas>
+    <div id="hud-flash"></div>
+    <div id="hud-top">
+      <div><span class="lbl">TIME</span> <span id="hud-time">0:00</span></div>
+      <div><span class="lbl">SCORE</span> <span id="hud-score">0</span></div>
+      <div><span class="lbl">RESERVES</span> <span id="hud-res">0</span></div>
+    </div>
+    <div id="hud-obj"></div>
+    <div id="hud-msgs"></div>
+    <div id="hud-feed"></div>
+    <div id="hud-banner"></div>
+    <div id="hud-dead" class="hidden"></div>
+    <div id="hud-bottom">
+      <div class="gauge">
+        <div class="g-row"><span class="lbl">SHIELD</span><div class="bar"><div id="bar-shield" class="fill shield"></div></div></div>
+        <div class="g-row"><span class="lbl">HULL</span><div class="bar"><div id="bar-hull" class="fill hull"></div></div></div>
+        <div class="g-row"><span class="lbl">BOOST</span><div class="bar"><div id="bar-boost" class="fill boost"></div></div></div>
+      </div>
+      <div class="radar-wrap"><canvas id="radar"></canvas></div>
+      <div class="gauge right">
+        <div class="thr"><div class="thr-bar"><div id="bar-throttle"></div></div><div><span id="spd">0</span><span class="lbl"> m/s</span></div></div>
+        <div class="sec"><div id="sec-name" class="lbl">SECONDARY</div><div id="sec-ammo"></div></div>
+      </div>
+    </div>
+    <div id="click-to-fly" class="hidden">Click to take the controls</div>
+    <input id="game-chat" class="hidden" maxlength="140" placeholder="Message your wing…" autocomplete="off" />
+  </div>
+
+  <!-- ============ PAUSE ============ -->
+  <section id="pause" class="screen overlay hidden">
+    <div class="panel pause-panel">
+      <div class="panel-h">Flight Menu</div>
+      <div class="muted">The mission keeps running — your wing needs you!</div>
+      <button id="btn-resume" class="btn primary">Resume</button>
+      <label class="field"><span>Mouse sensitivity <b id="sens-val"></b></span><input type="range" id="sens" min="0.3" max="2.5" step="0.1" /></label>
+      <label class="field"><span>Volume</span><input type="range" id="vol" min="0" max="1" step="0.05" /></label>
+      <label class="field check"><input type="checkbox" id="invert" /> <span>Invert pitch</span></label>
+      <label class="field check"><input type="checkbox" id="recenter" /> <span>Stick auto-centers</span></label>
+      <button id="btn-abort" class="btn">Abort mission (host)</button>
+      <button id="btn-quit" class="btn ghost">Leave wing</button>
+    </div>
+  </section>
+
+  <div id="loading" class="hidden">Preparing launch…</div>
+  <div id="toast"></div>
+  <script type="module" src="/js/main.js"></script>
+</body>
+</html>
