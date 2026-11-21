@@ -220,11 +220,15 @@ $('ship-models').addEventListener('change', (e) => {
   const d = V.getDoc(); d.settings.shipModels = { ...(d.settings.shipModels || {}), [k]: e.target.value };
   V.changed(); renderShips(); V.toast('Model chosen. Save to publish; players get it on their next visit.');
 });
-$('ship-models').addEventListener('click', (e) => {
+$('ship-models').addEventListener('click', async (e) => {
   const b = e.target.closest('[data-act]'); if (!b) return;
   const k = b.closest('.ship-row').dataset.ship; const d = V.getDoc();
   if (b.dataset.act === 'inspect') { const m = media.items.find((x) => x.url === d.settings.shipModels[k]); if (m) openModelInspector(m); }
-  if (b.dataset.act === 'inspect-builtin') openModelInspector({ name: `${SHIP_INFO[k][0]} (built-in)`, url: SHIP_INFO[k][2], report: {} });
+  if (b.dataset.act === 'inspect-builtin') {
+    let report = {};
+    try { report = await V.api('GET', `inspect-builtin?ship=${k}`); } catch (err) { report = { warnings: [`Couldn't read the model's details: ${err.message}`] }; }
+    openModelInspector({ name: `${SHIP_INFO[k][0]} (built-in)`, url: SHIP_INFO[k][2], report });
+  }
 });
 
 // ================= FEATURE FLAGS =================

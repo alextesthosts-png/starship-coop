@@ -405,6 +405,13 @@ async function handleApi(req, res, pathname) {
     if (!M.find(key)) return json(res, 404, { error: 'Not found' });
     try { await M.remove(key); return json(res, 200, { ok: true }); } catch (e) { return json(res, 502, { error: e.message }); }
   }
+  if (route === 'inspect-builtin' && req.method === 'GET') {
+    const ship = new URL(req.url, 'http://x').searchParams.get('ship');
+    const file = { lancer: 'lancer.glb', warden: 'warden.glb' }[ship];
+    if (!file) return json(res, 404, { error: 'No built-in model for that ship.' });
+    try { return json(res, 200, M.inspectGlb(fs.readFileSync(path.join(ROOT, 'public/models', file)))); }
+    catch (e) { return json(res, 500, { error: e.message }); }
+  }
   if (route === 'media/resync' && req.method === 'POST') {
     try { const n = await M.resync(); return json(res, 200, { ok: true, count: n, items: M.list() }); } catch (e) { return json(res, 502, { error: e.message }); }
   }
