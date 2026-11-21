@@ -335,7 +335,7 @@ function setPreview(k) {
   if (!preview) return;
   if (preview.ship) preview.scene.remove(preview.ship);
   preview.ship = buildShip(k, '#4fc3ff');
-  preview.ship.scale.setScalar(k === 'hammer' ? 0.85 : k === 'lancer' ? 0.6 : 1);
+  preview.ship.scale.setScalar(k === 'hammer' ? 0.85 : k === 'lancer' ? 0.6 : k === 'warden' ? 0.7 : 1);
   preview.ship.position.x = -3.5;
   preview.scene.add(preview.ship);
 }

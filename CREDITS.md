@@ -19,6 +19,11 @@ panel grid, rivets, grime) and baked with Cycles to albedo + tangent-space norma
 converted in Blender for the game (1K PBR textures with AO baked into colour, packed
 metal/roughness, normal + emissive maps). Verify its licence before public distribution.
 
+`public/models/warden.glb` is an original Warden heavy fighter modelled in Blender for this game
+(ring wing, ring cannons, chin turret, triple engines). Its procedural materials (painted armour with edge
+wear, hazard stripes, gunmetal, glass, glow) are baked to 2K colour/normal and 1K roughness-metal/emissive
+maps. Source: `warden.blend`. Engine empties carry a `plumeRadius` custom property for the exhaust plumes.
+
 `public/models/lancer_classic.glb` is the original Lancer modelled in Blender for this game
 (needle nose, forward-swept wings with wingtip cannons, twin engine pods, V-tail).
 Material names drive the in-game look: `*Hull`, `*Accent` (player colour), `*Dark`, `*Canopy`,

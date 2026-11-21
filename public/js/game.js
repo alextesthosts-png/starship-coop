@@ -689,7 +689,7 @@ export class Game {
     const cam = this.camera;
     if (this.me.alive) {
       const far = this.camMode === 1;
-      const sc = this.shipType === 'hammer' ? 1.25 : this.shipType === 'warden' ? 1.1 : 1;
+      const sc = this.shipType === 'hammer' ? 1.25 : this.shipType === 'warden' ? 1.2 : 1;
       const off = new THREE.Vector3(0, (far ? 7 : 4.2) * sc, (far ? 30 : 16) * sc).applyQuaternion(this.ship.quaternion);
       const desired = this.ship.position.clone().add(off);
       cam.position.lerp(desired, 1 - Math.exp(-dt * 14));

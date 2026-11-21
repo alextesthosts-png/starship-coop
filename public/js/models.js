@@ -9,8 +9,10 @@ import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 //   *Hull -> textured hull panels, *Accent -> player colour, *Dark -> dark panels,
 //   *Canopy -> glass, *Glow -> engine glow, *Baked -> kept exactly as authored (own textures,
 //   no player colour). Empties named engine_* get an engine flare.
-const SHIP_FILES = { lancer: '/models/lancer.glb' };
+const SHIP_FILES = { lancer: '/models/lancer.glb', warden: '/models/warden.glb' };
 const PLUME_RADIUS = { lancer: 0.62, warden: 0.9, hammer: 0.8 };
+// how strongly each ship's baked material reflects the studio environment
+const ENV_INTENSITY = { lancer: 1.0, warden: 0.28 };
 // Studio reflections for *Baked materials, so metals look like Blender's material preview
 let bakedEnv = null;
 export function setBakedEnvironment(tex) { bakedEnv = tex; }
@@ -38,7 +40,7 @@ function buildShipFromModel(type, color) {
       const pick = (m) => {
         const n = (m && m.name) || '';
         if (n.endsWith('Baked')) {
-          if (bakedEnv && !m.envMap) { m.envMap = bakedEnv; m.envMapIntensity = 1.0; m.needsUpdate = true; }
+          if (bakedEnv && !m.envMap) { m.envMap = bakedEnv; m.envMapIntensity = ENV_INTENSITY[type] ?? 0.5; m.needsUpdate = true; }
           return m;
         }
         return n.endsWith('Accent') ? accent : n.endsWith('Dark') ? darkM : n.endsWith('Canopy') ? canopy : n.endsWith('Glow') ? glowM : hullM;
@@ -52,7 +54,7 @@ function buildShipFromModel(type, color) {
     const ex = buildExhaust(color, r);
     e.add(ex);
     exhausts.push(ex);
-    const eg = engineGlow(color, r * 1.4);   // small nozzle flare only
+    const eg = engineGlow(color, r * 1.1);   // small nozzle flare only
     e.add(eg);
     engines.push(eg);
   }
@@ -125,15 +127,17 @@ const plumeGeo = (() => {
 function plumeMaterial(color, core) {
   return new THREE.ShaderMaterial({
     uniforms: { uColor: { value: new THREE.Color(color) }, uCore: { value: core ? 1 : 0 }, uTime: { value: 0 }, uPower: { value: 1 } },
-    vertexShader: `varying float vT; varying vec3 vN; varying vec3 vV;
-      void main(){ vT = position.z; vec4 mv = modelViewMatrix * vec4(position, 1.0); vN = normalize(normalMatrix * normal); vV = normalize(-mv.xyz); gl_Position = projectionMatrix * mv; }`,
-    fragmentShader: `uniform vec3 uColor; uniform float uCore; uniform float uTime; uniform float uPower; varying float vT; varying vec3 vN; varying vec3 vV;
+    vertexShader: `varying float vT; varying vec3 vN; varying vec3 vV; varying float vEnd;
+      void main(){ vT = position.z; vec4 mv = modelViewMatrix * vec4(position, 1.0); vN = normalize(normalMatrix * normal); vV = normalize(-mv.xyz);
+        vec3 axis = normalize(normalMatrix * vec3(0.0, 0.0, 1.0)); vEnd = abs(dot(axis, vV));
+        gl_Position = projectionMatrix * mv; }`,
+    fragmentShader: `uniform vec3 uColor; uniform float uCore; uniform float uTime; uniform float uPower; varying float vT; varying vec3 vN; varying vec3 vV; varying float vEnd;
       void main(){
         float facing = abs(dot(normalize(vN), normalize(vV)));           // 1 at the centre line of the cone, 0 at its silhouette
         float along = pow(1.0 - clamp(vT, 0.0, 1.0), 1.6);                // fade towards the tail
         float flicker = 0.88 + 0.12 * sin(uTime * 55.0 + vT * 18.0);
         vec3 c = uCore > 0.5 ? mix(uColor, vec3(1.0), 0.7) : uColor * 1.15;
-        float a = (uCore > 0.5 ? pow(facing, 2.0) * 1.5 : pow(facing, 1.2) * 0.75) * along * flicker * uPower;
+        float a = (uCore > 0.5 ? pow(facing, 2.0) * 1.0 : pow(facing, 1.2) * 0.5) * along * flicker * uPower * mix(1.0, 0.25, smoothstep(0.75, 0.98, vEnd));
         gl_FragColor = vec4(c * a * 2.2, 1.0);
       }`,
     blending: THREE.AdditiveBlending, depthWrite: false, transparent: true, side: THREE.DoubleSide, toneMapped: false,
@@ -145,12 +149,12 @@ export function buildExhaust(color, radius = 0.6) {
   const inner = new THREE.Mesh(plumeGeo, plumeMaterial(color, true));
   outer.frustumCulled = inner.frustumCulled = false;
   g.add(outer, inner);
-  const ring = new THREE.Mesh(new THREE.CircleGeometry(radius * 0.95, 24), new THREE.MeshBasicMaterial({ color: new THREE.Color(color).multiplyScalar(2.2), toneMapped: false, transparent: true, opacity: 0.9, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide }));
+  const ring = new THREE.Mesh(new THREE.CircleGeometry(radius * 0.9, 24), new THREE.MeshBasicMaterial({ color: new THREE.Color(color).multiplyScalar(1.4), toneMapped: false, transparent: true, opacity: 0.6, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide }));
   g.add(ring);
   let k = 0;
   g.userData.setThrust = (target, dt, time) => {
     k += (target - k) * Math.min(1, dt * 6);
-    const len = radius * (3 + k * 22);                 // idle ~3r, full boost ~25r
+    const len = Math.min(radius * (3 + k * 14), 3 + k * 6.5);   // stays well in front of the chase camera
     outer.scale.set(radius, radius, len);
     inner.scale.set(radius * 0.55, radius * 0.55, len * 0.8);
     for (const m of [outer, inner]) { m.material.uniforms.uTime.value = time; m.material.uniforms.uPower.value = 0.55 + k * 0.6; }
