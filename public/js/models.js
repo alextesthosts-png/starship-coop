@@ -7,8 +7,12 @@ import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 // ---------------- GLB ship models (authored in Blender) ----------------
 // Material names in the GLB decide the in-game look:
 //   *Hull -> textured hull panels, *Accent -> player colour, *Dark -> dark panels,
-//   *Canopy -> glass, *Glow -> engine glow. Empties named engine_* get an engine flare.
+//   *Canopy -> glass, *Glow -> engine glow, *Baked -> kept exactly as authored (own textures,
+//   no player colour). Empties named engine_* get an engine flare.
 const SHIP_FILES = { lancer: '/models/lancer.glb' };
+// Studio reflections for *Baked materials, so metals look like Blender's material preview
+let bakedEnv = null;
+export function setBakedEnvironment(tex) { bakedEnv = tex; }
 const shipModels = {};
 let preloadPromise = null;
 export function preloadShipModels() {
@@ -32,6 +36,10 @@ function buildShipFromModel(type, color) {
     if (o.isMesh) {
       const pick = (m) => {
         const n = (m && m.name) || '';
+        if (n.endsWith('Baked')) {
+          if (bakedEnv && !m.envMap) { m.envMap = bakedEnv; m.envMapIntensity = 1.0; m.needsUpdate = true; }
+          return m;
+        }
         return n.endsWith('Accent') ? accent : n.endsWith('Dark') ? darkM : n.endsWith('Canopy') ? canopy : n.endsWith('Glow') ? glowM : hullM;
       };
       o.material = Array.isArray(o.material) ? o.material.map(pick) : pick(o.material);

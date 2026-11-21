@@ -1,7 +1,8 @@
 // App shell: networking, menus, lobby, debrief, and the menu backdrop scene.
 import * as THREE from 'three';
 import { SHIPS, MISSIONS, DIFFICULTY } from '/shared/config.js';
-import { buildShip, preloadShipModels } from './models.js';
+import { buildShip, preloadShipModels, setBakedEnvironment } from './models.js';
+import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import { Sfx } from './audio.js';
 import { Hud, esc } from './hud.js';
 import { Input } from './input.js';
@@ -32,6 +33,11 @@ renderer.toneMapping = THREE.ACESFilmicToneMapping;
 renderer.toneMappingExposure = 1.0;
 renderer.outputColorSpace = THREE.SRGBColorSpace;
 setAnisotropy(renderer.capabilities.getMaxAnisotropy());
+{
+  const pmrem = new THREE.PMREMGenerator(renderer);
+  setBakedEnvironment(pmrem.fromScene(new RoomEnvironment(), 0.04).texture);
+  pmrem.dispose();
+}
 const hud = new Hud();
 const input = new Input(canvas);
 
@@ -150,6 +156,12 @@ async function refreshRooms() {
   } catch { $('room-list').innerHTML = '<div class="muted">Could not load wings.</div>'; }
 }
 setInterval(() => { if (S.screen === 'menu') refreshRooms(); }, 8000);
+
+document.querySelectorAll('.tab').forEach((t) => t.addEventListener('click', () => {
+  document.querySelectorAll('.tab').forEach((x) => x.classList.toggle('on', x === t));
+  document.querySelectorAll('.tab-body').forEach((b) => b.classList.toggle('hidden', b.id !== t.dataset.tab));
+  if (t.dataset.tab === 'tab-rooms') refreshRooms();
+}));
 
 // ---------------- lobby ----------------
 function isHost() { return S.room && S.room.hostId === S.myId; }
@@ -323,7 +335,7 @@ function setPreview(k) {
   if (!preview) return;
   if (preview.ship) preview.scene.remove(preview.ship);
   preview.ship = buildShip(k, '#4fc3ff');
-  preview.ship.scale.setScalar(k === 'hammer' ? 0.85 : k === 'lancer' ? 0.72 : 1);
+  preview.ship.scale.setScalar(k === 'hammer' ? 0.85 : k === 'lancer' ? 0.6 : 1);
   preview.ship.position.x = -3.5;
   preview.scene.add(preview.ship);
 }
@@ -351,7 +363,8 @@ function startPreview() {
     const w = window.innerWidth, h = window.innerHeight;
     if (renderer.domElement.width !== Math.floor(w * renderer.getPixelRatio())) renderer.setSize(w, h, false);
     cam.aspect = w / h; cam.updateProjectionMatrix();
-    cam.setViewOffset(w, h, w > 1000 ? -w * 0.18 : 0, 0, w, h);
+    cam.setViewOffset(w, h, w > 1250 ? -w * 0.29 : 0, w > 1250 ? h * 0.04 : 0, w, h);
+    if (preview.ship) preview.ship.visible = w > 1250;
     if (preview.ship) {
       preview.ship.rotation.y = preview.t * 0.4 + 0.6;
       preview.ship.rotation.z = Math.sin(preview.t * 0.7) * 0.15;

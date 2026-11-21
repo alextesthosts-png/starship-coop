@@ -18,43 +18,121 @@
 
   <!-- ============ MAIN MENU ============ -->
   <section id="menu" class="screen">
-    <div class="menu-left">
-      <div class="logo">
-        <div class="logo-top">VANGUARD</div>
-        <div class="logo-bot">WING</div>
-        <div class="logo-sub">co-op arcade starfighter</div>
-      </div>
-      <label class="field">
-        <span>Callsign</span>
-        <input id="name" maxlength="16" placeholder="Your pilot name" autocomplete="off" />
-      </label>
-      <div class="field"><span>Starfighter</span></div>
-      <div id="ship-select" class="ship-select"></div>
-      <div class="menu-buttons">
-        <button id="btn-quick" class="btn primary">Quick Play</button>
-        <button id="btn-create" class="btn">Create Wing</button>
-        <div class="join-row">
-          <input id="join-code" maxlength="4" placeholder="CODE" autocomplete="off" />
-          <button id="btn-join" class="btn">Join</button>
+    <div class="menu-wrap">
+      <header class="logo">
+        <div class="logo-top">VANGUARD <span>WING</span></div>
+        <div class="logo-sub">Co-op arcade starfighter · 1–4 pilots · plays in your browser</div>
+      </header>
+
+      <div class="card launch-card">
+        <div class="step"><span class="step-n">1</span> Choose your callsign</div>
+        <input id="name" maxlength="16" placeholder="e.g. Nightjar" autocomplete="off" aria-label="Callsign" />
+
+        <div class="step"><span class="step-n">2</span> Pick a starfighter</div>
+        <div id="ship-select" class="ship-select"></div>
+
+        <div class="step"><span class="step-n">3</span> Launch</div>
+        <div class="menu-buttons">
+          <button id="btn-quick" class="btn primary big">Quick Play <small>join any open wing</small></button>
+          <button id="btn-create" class="btn big">Create a Wing <small>invite friends with a code</small></button>
         </div>
+        <div class="join-row">
+          <input id="join-code" maxlength="4" placeholder="CODE" autocomplete="off" aria-label="Wing code" />
+          <button id="btn-join" class="btn">Join with code</button>
+        </div>
+        <div id="menu-error" class="error" role="alert"></div>
       </div>
-      <div id="menu-error" class="error"></div>
-      <div class="open-rooms">
-        <div class="sub-h">Open wings <button id="btn-refresh" class="link">refresh</button></div>
-        <div id="room-list"><div class="muted">Looking for wings…</div></div>
-      </div>
-    </div>
-    <div class="menu-right">
-      <div class="controls-card">
-        <div class="sub-h">Flight controls</div>
-        <div class="kb"><kbd>Mouse</kbd> steer (virtual stick)</div>
-        <div class="kb"><kbd>W</kbd>/<kbd>S</kbd> throttle &nbsp; <kbd>A</kbd>/<kbd>D</kbd> roll</div>
-        <div class="kb"><kbd>LMB</kbd>/<kbd>Space</kbd> cannons</div>
-        <div class="kb"><kbd>RMB</kbd>/<kbd>F</kbd> secondary weapon</div>
-        <div class="kb"><kbd>Shift</kbd> boost &nbsp; <kbd>C</kbd> camera</div>
-        <div class="kb"><kbd>T</kbd> target nearest crosshair &nbsp; <kbd>R</kbd> nearest enemy</div>
-        <div class="kb"><kbd>Enter</kbd> chat &nbsp; <kbd>Esc</kbd> menu &nbsp; <kbd>M</kbd> mute</div>
-        <div class="kb muted">Gamepad supported: sticks fly, RT fire, LT/RB secondary, A boost, Y target.</div>
+
+      <div class="card info-card">
+        <nav class="tabs" role="tablist">
+          <button class="tab on" data-tab="tab-rooms" role="tab">Open Wings</button>
+          <button class="tab" data-tab="tab-howto" role="tab">How to Play</button>
+          <button class="tab" data-tab="tab-changelog" role="tab">Changelog</button>
+        </nav>
+
+        <div id="tab-rooms" class="tab-body">
+          <div class="tab-head">Wings looking for pilots <button id="btn-refresh" class="link">refresh</button></div>
+          <div id="room-list"><div class="muted">Looking for wings…</div></div>
+        </div>
+
+        <div id="tab-howto" class="tab-body hidden">
+          <div class="howto-grid">
+            <div>
+              <h3>Keyboard &amp; mouse</h3>
+              <ul class="keys">
+                <li><kbd>Mouse</kbd><span>Steer — the ship follows a virtual stick</span></li>
+                <li><kbd>W</kbd><kbd>S</kbd><span>Throttle up / down</span></li>
+                <li><kbd>A</kbd><kbd>D</kbd><span>Roll</span></li>
+                <li><kbd>Left click</kbd><kbd>Space</kbd><span>Cannons</span></li>
+                <li><kbd>Right click</kbd><kbd>F</kbd><span>Secondary weapon</span></li>
+                <li><kbd>Shift</kbd><span>Boost</span></li>
+                <li><kbd>T</kbd><span>Target what's under the crosshair</span></li>
+                <li><kbd>R</kbd><span>Target the nearest enemy</span></li>
+                <li><kbd>C</kbd><span>Switch camera</span></li>
+                <li><kbd>Enter</kbd><span>Chat with your wing</span></li>
+                <li><kbd>Esc</kbd><span>Flight menu (sensitivity, volume)</span></li>
+                <li><kbd>M</kbd><span>Mute</span></li>
+              </ul>
+            </div>
+            <div>
+              <h3>Gamepad</h3>
+              <ul class="keys">
+                <li><kbd>Left stick</kbd><span>Pitch &amp; yaw</span></li>
+                <li><kbd>Right stick</kbd><span>Roll &amp; throttle</span></li>
+                <li><kbd>RT</kbd><span>Cannons</span></li>
+                <li><kbd>LT</kbd><kbd>RB</kbd><span>Secondary</span></li>
+                <li><kbd>A</kbd><span>Boost</span></li>
+                <li><kbd>Y</kbd><span>Target</span></li>
+              </ul>
+              <h3>Tips</h3>
+              <ul class="tips">
+                <li>Shoot at the diamond ahead of your target — it shows where your shots will meet it.</li>
+                <li>Seeker missiles need a lock: keep the target near your crosshair until it says LOCKED.</li>
+                <li>Shields recharge after a few seconds out of fire. Hull doesn't.</li>
+                <li>Reserve ships are shared by the whole wing. Bonus objectives earn silver and gold medals.</li>
+              </ul>
+            </div>
+          </div>
+        </div>
+
+        <div id="tab-changelog" class="tab-body hidden">
+          <article class="release">
+            <h3>v1.3 <span class="date">21 Nov 2026</span> <span class="tag new">Latest</span></h3>
+            <ul>
+              <li><b>New Lancer starfighter.</b> The interceptor now flies a detailed hull with gunmetal plating, panel wear, glass canopy, intake vents and glowing details, taken straight from its Blender scene.</li>
+              <li><b>Realistic metal.</b> Ships with authored materials now reflect a studio light environment, so metal reads as metal instead of flat grey.</li>
+              <li><b>Cannon positions</b> moved to match the new hull. Engine flares sit on the real exhausts.</li>
+              <li><b>Model pipeline.</b> Materials named <code>…Baked</code> keep their textures exactly as made in Blender (no per-player colour); others still take your wing colour.</li>
+              <li><b>New landing page</b> with a centred, step-by-step menu, How to Play and this changelog.</li>
+            </ul>
+          </article>
+          <article class="release">
+            <h3>v1.2 <span class="date">21 Nov 2026</span></h3>
+            <ul>
+              <li>First Blender-modelled Lancer (forward-swept wings, wingtip cannons, V-tail), kept as <code>lancer_classic.glb</code>.</li>
+              <li>Ships can now load from GLB model files, with engine flares placed by markers in the model and a built-in fallback ship if a file fails to load.</li>
+            </ul>
+          </article>
+          <article class="release">
+            <h3>v1.1 <span class="date">18 Nov 2026</span></h3>
+            <ul>
+              <li><b>Textured terrain on Kessa Prime:</b> red desert sand on the flats, dry rocky ground on slopes and layered cliff strata on canyon walls, blended automatically by slope and height.</li>
+              <li>Each texture is sampled at two sizes so it doesn't visibly repeat across the canyon.</li>
+              <li>Rock textures on asteroids and spires. Panelled hull plating on the dreadnought, freighters, towers, base buildings and enemy ships.</li>
+              <li>Brighter dreadnought and cleaner objective labels at long range.</li>
+            </ul>
+          </article>
+          <article class="release">
+            <h3>v1.0 <span class="date">18 Nov 2026</span></h3>
+            <ul>
+              <li>Launch: online co-op for 1–4 pilots with invite codes, Quick Play and AI wingmates to fill empty slots.</li>
+              <li>Three ships: Lancer (interceptor, seeker missiles), Warden (heavy fighter, flak), Hammer (bomber, plasma bombs).</li>
+              <li>Three missions: Outpost Siege, Convoy Intercept, Fall of the Ravager. Each has bonus objectives for bronze, silver and gold medals.</li>
+              <li>Shared reserve ships, radar, lead indicator, missile lock, radio chatter, debrief stats and gamepad support.</li>
+            </ul>
+          </article>
+          <p class="muted small">Texture credits: Poly Haven (CC0). See CREDITS.md in the repository.</p>
+        </div>
       </div>
     </div>
   </section>
