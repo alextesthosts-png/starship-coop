@@ -4,7 +4,7 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Vanguard Wing — Co-op Starfighter</title>
-  <meta name="description" content="A co-op 3D arcade starfighter game in your browser. Fly missions with up to 4 friends." />
+  <meta id="meta-desc" name="description" content="A co-op 3D arcade starfighter game in your browser. Fly missions with up to 4 friends." />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@500;700;900&family=Rajdhani:wght@500;600;700&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="/style.css" />
@@ -20,34 +20,35 @@
   <section id="menu" class="screen">
     <div class="menu-wrap">
       <header class="logo">
-        <div class="logo-top">VANGUARD <span>WING</span></div>
-        <div class="logo-sub">Co-op arcade starfighter · 1–4 pilots · plays in your browser</div>
+        <div class="logo-top"><span id="c-title">VANGUARD</span> <span id="c-accent" class="accent">WING</span></div>
+        <div class="logo-sub" id="c-tagline">Co-op arcade starfighter · 1–4 pilots · plays in your browser</div>
       </header>
 
       <div class="card launch-card">
-        <div class="step"><span class="step-n">1</span> Choose your callsign</div>
+        <div id="announce" class="announce hidden"></div>
+        <div class="step"><span class="step-n">1</span> <span id="c-step1">Choose your callsign</span></div>
         <input id="name" maxlength="16" placeholder="e.g. Nightjar" autocomplete="off" aria-label="Callsign" />
 
-        <div class="step"><span class="step-n">2</span> Pick a starfighter</div>
+        <div class="step"><span class="step-n">2</span> <span id="c-step2">Pick a starfighter</span></div>
         <div id="ship-select" class="ship-select"></div>
 
-        <div class="step"><span class="step-n">3</span> Launch</div>
+        <div class="step"><span class="step-n">3</span> <span id="c-step3">Launch</span></div>
         <div class="menu-buttons">
-          <button id="btn-quick" class="btn primary big">Quick Play <small>join any open wing</small></button>
-          <button id="btn-create" class="btn big">Create a Wing <small>invite friends with a code</small></button>
+          <button id="btn-quick" class="btn primary big"><span id="c-quick">Quick Play</span> <small id="c-quicksub">join any open wing</small></button>
+          <button id="btn-create" class="btn big"><span id="c-create">Create a Wing</span> <small id="c-createsub">invite friends with a code</small></button>
         </div>
         <div class="join-row">
           <input id="join-code" maxlength="4" placeholder="CODE" autocomplete="off" aria-label="Wing code" />
-          <button id="btn-join" class="btn">Join with code</button>
+          <button id="btn-join" class="btn"><span id="c-join">Join with code</span></button>
         </div>
         <div id="menu-error" class="error" role="alert"></div>
       </div>
 
       <div class="card info-card">
         <nav class="tabs" role="tablist">
-          <button class="tab on" data-tab="tab-rooms" role="tab">Open Wings</button>
-          <button class="tab" data-tab="tab-howto" role="tab">How to Play</button>
-          <button class="tab" data-tab="tab-changelog" role="tab">Changelog</button>
+          <button class="tab on" data-tab="tab-rooms" data-key="rooms" role="tab">Open Wings</button>
+          <button class="tab" data-tab="tab-howto" data-key="howto" role="tab">How to Play</button>
+          <button class="tab" data-tab="tab-changelog" data-key="changelog" role="tab">Changelog</button>
         </nav>
 
         <div id="tab-rooms" class="tab-body">
@@ -96,6 +97,7 @@
         </div>
 
         <div id="tab-changelog" class="tab-body hidden">
+          <div id="changelog-list">
           <article class="release">
             <h3>v1.4 <span class="date">21 Nov 2026</span> <span class="tag new">Latest</span></h3>
             <ul>
@@ -140,8 +142,10 @@
               <li>Shared reserve ships, radar, lead indicator, missile lock, radio chatter, debrief stats and gamepad support.</li>
             </ul>
           </article>
+          </div>
           <p class="muted small">Texture credits: Poly Haven (CC0). See CREDITS.md in the repository.</p>
         </div>
+        <div id="custom-sections"></div>
       </div>
     </div>
   </section>

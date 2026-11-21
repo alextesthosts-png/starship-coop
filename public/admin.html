@@ -1,0 +1,174 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="robots" content="noindex" />
+  <title>Admin · Vanguard Wing</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@700;900&family=Rajdhani:wght@500;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/style.css" />
+  <link rel="stylesheet" href="/admin.css" />
+</head>
+<body class="admin">
+  <!-- login -->
+  <section id="login" class="login-wrap hidden">
+    <form id="login-form" class="card login-card" autocomplete="on">
+      <div class="logo-top small">VANGUARD <span class="accent">WING</span></div>
+      <h1>Admin sign in</h1>
+      <label class="fld"><span>Username</span><input id="l-user" name="username" autocomplete="username" value="admin" required /></label>
+      <label class="fld"><span>Password</span><input id="l-pass" name="password" type="password" autocomplete="current-password" required /></label>
+      <button class="btn primary" type="submit">Sign in</button>
+      <div id="login-err" class="error" role="alert"></div>
+      <a class="link back" href="/">← Back to the game</a>
+    </form>
+  </section>
+
+  <!-- app -->
+  <section id="app" class="hidden">
+    <header class="topbar">
+      <div class="brand">VANGUARD <span class="accent">WING</span> <em>Admin</em></div>
+      <div class="status" id="save-status">All changes saved</div>
+      <div class="top-actions">
+        <a class="btn ghost" href="/" target="_blank" rel="noopener">View site ↗</a>
+        <button class="btn primary" id="btn-save" disabled>Save changes</button>
+        <button class="btn ghost" id="btn-logout">Log out</button>
+      </div>
+    </header>
+    <div class="layout">
+      <nav class="side" id="side">
+        <button data-page="landing" class="on">Landing page</button>
+        <button data-page="announce">Announcement</button>
+        <button data-page="sections">Custom sections</button>
+        <button data-page="changelog">Changelog</button>
+        <button data-page="settings">Settings</button>
+        <button data-page="history">History</button>
+        <button data-page="account">Account</button>
+        <div class="side-stats" id="stats"></div>
+      </nav>
+      <main id="pages">
+        <!-- Landing -->
+        <div class="page" id="p-landing">
+          <h2>Landing page</h2>
+          <p class="hint">The texts players see on the start screen. Changes go live as soon as you save.</p>
+          <div class="grid2">
+            <div class="card">
+              <h3>Logo &amp; tagline</h3>
+              <label class="fld"><span>Title</span><input data-bind="site.title" maxlength="30" /></label>
+              <label class="fld"><span>Title (accent coloured part)</span><input data-bind="site.titleAccent" maxlength="30" /></label>
+              <label class="fld"><span>Tagline</span><input data-bind="site.tagline" maxlength="160" /></label>
+            </div>
+            <div class="card">
+              <h3>Browser tab &amp; search</h3>
+              <label class="fld"><span>Page title</span><input data-bind="site.pageTitle" maxlength="80" /></label>
+              <label class="fld"><span>Description (shown by search engines)</span><textarea data-bind="site.metaDescription" maxlength="200" rows="3"></textarea></label>
+            </div>
+            <div class="card">
+              <h3>Steps</h3>
+              <label class="fld"><span>Step 1</span><input data-bind="site.step1" maxlength="60" /></label>
+              <label class="fld"><span>Callsign placeholder</span><input data-bind="site.namePlaceholder" maxlength="30" /></label>
+              <label class="fld"><span>Step 2</span><input data-bind="site.step2" maxlength="60" /></label>
+              <label class="fld"><span>Step 3</span><input data-bind="site.step3" maxlength="60" /></label>
+            </div>
+            <div class="card">
+              <h3>Buttons</h3>
+              <div class="row2">
+                <label class="fld"><span>Quick Play label</span><input data-bind="site.quickLabel" maxlength="30" /></label>
+                <label class="fld"><span>Quick Play subtitle</span><input data-bind="site.quickSub" maxlength="60" /></label>
+              </div>
+              <div class="row2">
+                <label class="fld"><span>Create label</span><input data-bind="site.createLabel" maxlength="30" /></label>
+                <label class="fld"><span>Create subtitle</span><input data-bind="site.createSub" maxlength="60" /></label>
+              </div>
+              <label class="fld"><span>Join button</span><input data-bind="site.joinLabel" maxlength="30" /></label>
+            </div>
+          </div>
+        </div>
+
+        <!-- Announcement -->
+        <div class="page hidden" id="p-announce">
+          <h2>Announcement</h2>
+          <p class="hint">A banner at the top of the start screen, for events, news or patch notes.</p>
+          <div class="card">
+            <label class="switch"><input type="checkbox" data-bind="announcement.enabled" /> <span>Show the announcement</span></label>
+            <label class="fld"><span>Style</span>
+              <select data-bind="announcement.style"><option value="info">Info (blue)</option><option value="success">Good news (green)</option><option value="warning">Warning (amber)</option></select>
+            </label>
+            <label class="fld"><span>Text</span><textarea data-bind="announcement.text" rows="5" maxlength="500" placeholder="e.g. **Double score weekend!** Fly any mission this weekend…"></textarea></label>
+            <div class="fmt-help">Formatting: <code>**bold**</code> <code>*italic*</code> <code>`code`</code> <code>[link](https://…)</code> <code>- list item</code></div>
+            <h4>Preview</h4>
+            <div id="announce-preview"></div>
+          </div>
+        </div>
+
+        <!-- Sections -->
+        <div class="page hidden" id="p-sections">
+          <h2>Custom sections</h2>
+          <p class="hint">Extra tabs next to Open Wings, How to Play and Changelog: rules, events, credits, FAQ, anything.</p>
+          <div id="sections-list"></div>
+          <button class="btn" id="btn-add-section">+ Add section</button>
+        </div>
+
+        <!-- Changelog -->
+        <div class="page hidden" id="p-changelog">
+          <h2>Changelog</h2>
+          <p class="hint">Newest first. Each line in the notes box becomes one bullet point.</p>
+          <button class="btn primary" id="btn-add-release">+ New release</button>
+          <div id="releases"></div>
+        </div>
+
+        <!-- Settings -->
+        <div class="page hidden" id="p-settings">
+          <h2>Settings</h2>
+          <div class="grid2">
+            <div class="card">
+              <h3>Look</h3>
+              <label class="fld"><span>Accent colour</span>
+                <span class="color-row"><input type="color" data-bind="settings.accent" /><input data-bind="settings.accent" maxlength="7" class="hex" /></span>
+              </label>
+              <div class="swatches" id="swatches"></div>
+            </div>
+            <div class="card">
+              <h3>Info tabs</h3>
+              <label class="switch"><input type="checkbox" data-bind="settings.showOpenWings" /> <span>Show “Open Wings”</span></label>
+              <label class="switch"><input type="checkbox" data-bind="settings.showHowTo" /> <span>Show “How to Play”</span></label>
+              <label class="switch"><input type="checkbox" data-bind="settings.showChangelog" /> <span>Show “Changelog”</span></label>
+              <label class="fld"><span>Tab opened by default</span><select data-bind="settings.defaultTab" id="default-tab"></select></label>
+            </div>
+            <div class="card">
+              <h3>Maintenance mode</h3>
+              <p class="hint">Pauses new games: the play buttons are disabled and the server refuses to create, join or launch wings. Missions already in flight finish normally.</p>
+              <label class="switch warn"><input type="checkbox" data-bind="settings.maintenance.enabled" /> <span>Maintenance mode on</span></label>
+              <label class="fld"><span>Message to players</span><textarea data-bind="settings.maintenance.message" rows="3" maxlength="300"></textarea></label>
+            </div>
+          </div>
+        </div>
+
+        <!-- History -->
+        <div class="page hidden" id="p-history">
+          <h2>History</h2>
+          <p class="hint">Every save keeps the previous version (last 30). Restoring makes that version live again, and the current one is kept in history too.</p>
+          <div class="card"><div id="revisions"></div></div>
+          <button class="btn" id="btn-export">Download current content (JSON)</button>
+        </div>
+
+        <!-- Account -->
+        <div class="page hidden" id="p-account">
+          <h2>Account</h2>
+          <form class="card narrow" id="pw-form">
+            <h3>Change password</h3>
+            <input type="text" name="username" autocomplete="username" class="hidden" id="pw-user" />
+            <label class="fld"><span>Current password</span><input type="password" id="pw-cur" autocomplete="current-password" required /></label>
+            <label class="fld"><span>New password (10+ characters)</span><input type="password" id="pw-new" autocomplete="new-password" minlength="10" required /></label>
+            <label class="fld"><span>Repeat new password</span><input type="password" id="pw-new2" autocomplete="new-password" minlength="10" required /></label>
+            <button class="btn primary" type="submit">Change password</button>
+            <div id="pw-msg" class="hint"></div>
+          </form>
+        </div>
+      </main>
+    </div>
+  </section>
+  <div id="toast"></div>
+  <script type="module" src="/js/admin.js"></script>
+</body>
+</html>

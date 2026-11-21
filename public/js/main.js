@@ -3,6 +3,7 @@ import * as THREE from 'three';
 import { SHIPS, MISSIONS, DIFFICULTY } from '/shared/config.js';
 import { buildShip, preloadShipModels, setBakedEnvironment } from './models.js';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
+import { render as renderMarkup, inline as inlineMarkup, escapeHtml } from '/shared/markup.js';
 import { Sfx } from './audio.js';
 import { Hud, esc } from './hud.js';
 import { Input } from './input.js';
@@ -157,11 +158,73 @@ async function refreshRooms() {
 }
 setInterval(() => { if (S.screen === 'menu') refreshRooms(); }, 8000);
 
-document.querySelectorAll('.tab').forEach((t) => t.addEventListener('click', () => {
-  document.querySelectorAll('.tab').forEach((x) => x.classList.toggle('on', x === t));
-  document.querySelectorAll('.tab-body').forEach((b) => b.classList.toggle('hidden', b.id !== t.dataset.tab));
-  if (t.dataset.tab === 'tab-rooms') refreshRooms();
-}));
+function openTab(id) {
+  document.querySelectorAll('.tabs .tab').forEach((x) => x.classList.toggle('on', x.dataset.tab === id));
+  document.querySelectorAll('.info-card .tab-body').forEach((b) => b.classList.toggle('hidden', b.id !== id));
+  if (id === 'tab-rooms') refreshRooms();
+}
+document.querySelector('.tabs').addEventListener('click', (e) => { const t = e.target.closest('.tab'); if (t) openTab(t.dataset.tab); });
+
+// ---------------- editable site content (from the admin panel) ----------------
+S.maintenance = null;
+function setText(id, v) { const el = document.getElementById(id); if (el && typeof v === 'string' && v) el.textContent = v; }
+function shade(hex, k) {
+  const n = parseInt(hex.slice(1), 16), r = (n >> 16) & 255, g = (n >> 8) & 255, b = n & 255;
+  const f = (x) => Math.max(0, Math.min(255, Math.round(x * k)));
+  return `rgb(${f(r)}, ${f(g)}, ${f(b)})`;
+}
+function applyContent(c) {
+  const s = c.site || {};
+  if (s.pageTitle) document.title = s.pageTitle;
+  if (s.metaDescription) document.getElementById('meta-desc')?.setAttribute('content', s.metaDescription);
+  setText('c-title', s.title); setText('c-accent', s.titleAccent); setText('c-tagline', s.tagline);
+  setText('c-step1', s.step1); setText('c-step2', s.step2); setText('c-step3', s.step3);
+  setText('c-quick', s.quickLabel); setText('c-quicksub', s.quickSub); setText('c-create', s.createLabel); setText('c-createsub', s.createSub); setText('c-join', s.joinLabel);
+  if (s.namePlaceholder) $('name').placeholder = s.namePlaceholder;
+  const st = c.settings || {};
+  if (st.accent) {
+    document.documentElement.style.setProperty('--cyan', st.accent);
+    document.documentElement.style.setProperty('--cyan-d', shade(st.accent, 0.42));
+    document.documentElement.style.setProperty('--line', shade(st.accent, 1).replace('rgb', 'rgba').replace(')', ', 0.28)'));
+  }
+  // announcement + maintenance banner (all text is escaped by the markup renderer)
+  const an = $('announce');
+  const parts = [];
+  S.maintenance = st.maintenance?.enabled ? (st.maintenance.message || 'Maintenance in progress.') : null;
+  if (S.maintenance) parts.push({ style: 'warning', html: `<p><b>Maintenance:</b> ${inlineMarkup(S.maintenance)}</p>` });
+  if (c.announcement?.enabled && c.announcement.text) parts.push({ style: c.announcement.style, html: renderMarkup(c.announcement.text) });
+  an.classList.toggle('hidden', !parts.length);
+  if (parts.length) { an.className = `announce ${parts[0].style}`; an.innerHTML = parts.map((p) => p.html).join(''); }
+  document.querySelector('.launch-card').classList.toggle('maint', !!S.maintenance);
+  for (const id of ['btn-quick', 'btn-create', 'btn-join']) $(id).disabled = !!S.maintenance;
+  // tabs: built-in visibility + custom sections
+  const tabs = document.querySelector('.tabs');
+  tabs.querySelectorAll('.tab.custom').forEach((t) => t.remove());
+  $('custom-sections').innerHTML = '';
+  const vis = { rooms: st.showOpenWings !== false, howto: st.showHowTo !== false, changelog: st.showChangelog !== false };
+  tabs.querySelectorAll('.tab[data-key]').forEach((t) => t.classList.toggle('hidden', !vis[t.dataset.key]));
+  for (const sec of c.sections || []) {
+    const b = document.createElement('button');
+    b.className = 'tab custom'; b.dataset.tab = `tab-s-${sec.id}`; b.dataset.key = sec.id; b.setAttribute('role', 'tab'); b.textContent = sec.title;
+    tabs.appendChild(b);
+    const body = document.createElement('div');
+    body.id = `tab-s-${sec.id}`; body.className = 'tab-body md hidden'; body.innerHTML = renderMarkup(sec.body);
+    $('custom-sections').appendChild(body);
+  }
+  // changelog
+  if (Array.isArray(c.changelog)) {
+    $('changelog-list').innerHTML = c.changelog.length ? c.changelog.map((r, i) => `
+      <article class="release">
+        <h3>${escapeHtml(r.version)} <span class="date">${escapeHtml(r.date)}</span>${r.latest ? ' <span class="tag new">Latest</span>' : ''}${r.title ? ` <span class="rtitle">${inlineMarkup(r.title)}</span>` : ''}</h3>
+        <ul>${r.items.map((t) => `<li>${inlineMarkup(t)}</li>`).join('')}</ul>
+      </article>`).join('') : '<p class="muted">No releases yet.</p>';
+  }
+  const visibleTabs = [...tabs.querySelectorAll('.tab:not(.hidden)')];
+  const want = visibleTabs.find((t) => t.dataset.key === st.defaultTab) || visibleTabs[0];
+  document.querySelector('.info-card').classList.toggle('hidden', !visibleTabs.length);
+  if (want) openTab(want.dataset.tab);
+}
+fetch('/api/content').then((r) => r.json()).then(applyContent).catch(() => {});
 
 // ---------------- lobby ----------------
 function isHost() { return S.room && S.room.hostId === S.myId; }

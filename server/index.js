@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { WebSocketServer } from 'ws';
 import * as THREE from 'three';
 import { Sim } from './sim.js';
+import * as C from './content.js';
 import { SHIPS, MISSIONS, DIFFICULTY, MAX_PLAYERS, PLAYER_COLORS } from '../shared/config.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -173,8 +174,15 @@ class Room {
 // ---------------- message handling ----------------
 const clean = (s, n) => String(s || '').replace(/[<>&"]/g, '').trim().slice(0, n);
 
+function maintenanceBlocked(p) {
+  const m = C.getContent().settings.maintenance;
+  if (m.enabled) { send(p.ws, { t: 'error', msg: m.message || 'Maintenance in progress — new games are paused.' }); return true; }
+  return false;
+}
+
 function handle(p, msg) {
   const room = p.room;
+  if (['create', 'join', 'quick', 'start'].includes(msg.t) && maintenanceBlocked(p)) return;
   switch (msg.t) {
     case 'hello':
       p.name = clean(msg.name, 16) || `Pilot-${p.id}`;
@@ -260,10 +268,95 @@ function handle(p, msg) {
 }
 
 // ---------------- http ----------------
+function json(res, code, obj, extra = {}) {
+  res.writeHead(code, { 'content-type': 'application/json', 'cache-control': 'no-store', ...extra });
+  res.end(JSON.stringify(obj));
+}
+function readBody(req, limit = 512 * 1024) {
+  return new Promise((resolve, reject) => {
+    let size = 0; const chunks = [];
+    req.on('data', (c) => { size += c.length; if (size > limit) { reject(new Error('too large')); req.destroy(); } else chunks.push(c); });
+    req.on('end', () => { try { resolve(chunks.length ? JSON.parse(Buffer.concat(chunks).toString('utf8')) : {}); } catch { reject(new Error('bad json')); } });
+    req.on('error', reject);
+  });
+}
+function cookies(req) {
+  const out = {};
+  for (const part of (req.headers.cookie || '').split(';')) { const i = part.indexOf('='); if (i > 0) out[part.slice(0, i).trim()] = decodeURIComponent(part.slice(i + 1).trim()); }
+  return out;
+}
+const clientIp = (req) => (req.headers['x-forwarded-for'] || '').split(',')[0].trim() || req.socket.remoteAddress || '?';
+const isHttps = (req) => req.headers['x-forwarded-proto'] === 'https';
+function sessionCookie(req, token, maxAge) {
+  return `vw_admin=${token}; Path=/; HttpOnly; SameSite=Strict; Max-Age=${maxAge}${isHttps(req) ? '; Secure' : ''}`;
+}
+
+async function handleApi(req, res, pathname) {
+  if (pathname === '/api/content' && req.method === 'GET') {
+    const c = C.getContent();
+    return json(res, 200, { site: c.site, announcement: c.announcement, settings: c.settings, sections: c.sections.filter((x) => x.visible), changelog: c.changelog, updatedAt: c.updatedAt });
+  }
+  if (!pathname.startsWith('/api/admin/')) return json(res, 404, { error: 'not found' });
+  const token = cookies(req).vw_admin;
+  const session = C.getSession(token);
+  const route = pathname.slice('/api/admin/'.length);
+  // state-changing admin calls must come from our own page (SameSite cookie + custom header)
+  if (req.method !== 'GET' && req.headers['x-vw-admin'] !== '1') return json(res, 403, { error: 'forbidden' });
+  if (route === 'me' && req.method === 'GET') return json(res, 200, { authed: !!session, user: session?.user || null, configured: C.adminConfigured() });
+  if (route === 'login' && req.method === 'POST') {
+    const ip = clientIp(req);
+    if (!C.adminConfigured()) return json(res, 503, { error: 'Admin is not set up yet: set the ADMIN_PASSWORD variable on the server.' });
+    if (!C.loginAllowed(ip)) return json(res, 429, { error: 'Too many attempts. Try again in 10 minutes.' });
+    let body; try { body = await readBody(req, 4096); } catch { return json(res, 400, { error: 'bad request' }); }
+    if (!C.checkLogin(body.user, body.password)) { C.recordFailure(ip); return json(res, 401, { error: 'Wrong username or password.' }); }
+    C.clearFailures(ip);
+    const t = C.createSession(C.adminUser());
+    return json(res, 200, { ok: true, user: C.adminUser() }, { 'set-cookie': sessionCookie(req, t, C.SESSION_SECONDS) });
+  }
+  if (route === 'logout' && req.method === 'POST') {
+    C.endSession(token);
+    return json(res, 200, { ok: true }, { 'set-cookie': sessionCookie(req, '', 0) });
+  }
+  if (!session) return json(res, 401, { error: 'Please log in.' });
+  if (route === 'content' && req.method === 'GET') return json(res, 200, C.getContent());
+  if (route === 'content' && req.method === 'PUT') {
+    let body; try { body = await readBody(req); } catch (e) { return json(res, 400, { error: e.message }); }
+    const saved = C.saveContent(body, session.user);
+    return json(res, 200, saved);
+  }
+  if (route === 'revisions' && req.method === 'GET') return json(res, 200, C.listRevisions());
+  if (route === 'revisions/restore' && req.method === 'POST') {
+    let body; try { body = await readBody(req, 4096); } catch { return json(res, 400, { error: 'bad request' }); }
+    try { return json(res, 200, C.restoreRevision(String(body.id || ''), session.user)); } catch { return json(res, 404, { error: 'Revision not found.' }); }
+  }
+  if (route === 'password' && req.method === 'POST') {
+    let body; try { body = await readBody(req, 4096); } catch { return json(res, 400, { error: 'bad request' }); }
+    if (!C.checkLogin(session.user, body.current)) return json(res, 400, { error: 'Current password is wrong.' });
+    if (typeof body.next !== 'string' || body.next.length < 10) return json(res, 400, { error: 'New password must be at least 10 characters.' });
+    C.setPassword(body.next);
+    C.endAllSessions();
+    const t = C.createSession(session.user);
+    return json(res, 200, { ok: true }, { 'set-cookie': sessionCookie(req, t, C.SESSION_SECONDS) });
+  }
+  if (route === 'stats' && req.method === 'GET') {
+    return json(res, 200, { rooms: rooms.size, players: [...rooms.values()].reduce((n, r) => n + r.players.size, 0), playing: [...rooms.values()].filter((r) => r.state === 'playing').length, dataDir: C.DATA_DIR });
+  }
+  return json(res, 404, { error: 'not found' });
+}
+
 const server = http.createServer((req, res) => {
   const url = new URL(req.url, 'http://x');
-  let pathname = decodeURIComponent(url.pathname);
+  let pathname;
+  try { pathname = decodeURIComponent(url.pathname); } catch { res.writeHead(400); return res.end(); }
   if (pathname === '/health') { res.writeHead(200, { 'content-type': 'text/plain' }); return res.end('ok'); }
+  if (pathname.startsWith('/api/') && pathname !== '/api/rooms') {
+    return handleApi(req, res, pathname).catch((e) => { console.error('api error', e); json(res, 500, { error: 'server error' }); });
+  }
+  if (pathname === '/admin' || pathname === '/admin/') {
+    pathname = '/admin.html';
+    res.setHeader('x-frame-options', 'DENY');
+    res.setHeader('x-robots-tag', 'noindex');
+  }
   if (pathname === '/api/rooms') {
     const list = [...rooms.values()].filter((r) => r.isPublic && r.players.size < MAX_PLAYERS).map((r) => ({
       code: r.code, players: r.players.size, state: r.state, mission: MISSIONS.find((m) => m.id === r.missionId)?.name,
