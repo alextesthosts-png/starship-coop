@@ -135,3 +135,30 @@ table.kv { width: 100%; border-collapse: collapse; font-size: 15px; } table.kv t
 .section-h { margin: 22px 0 10px; font-size: 18px; }
 .spark { width: 100%; display: block; margin-top: 12px; }
 @media (max-width: 1100px) { .health-cards { grid-template-columns: repeat(2, 1fr); } .chart-grid, .inspector { grid-template-columns: 1fr; } .upload-row { grid-template-columns: 1fr; } }
+
+/* ---------- game tuning ---------- */
+.tune-tools { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+.tune-tools input[type=search] { width: 200px; }
+.tune-tools .chk { display: flex; gap: 6px; align-items: center; font-size: 14px; color: var(--muted, #9ab); white-space: nowrap; }
+#tune-sections { margin: 6px 0 16px; flex-wrap: wrap; }
+#tune-sections button .n { display: inline-block; min-width: 18px; margin-left: 6px; padding: 0 5px; border-radius: 9px; background: var(--cyan); color: #04121d; font-size: 12px; line-height: 18px; }
+.tune-group h3 { margin: 0 0 2px; display: flex; align-items: center; gap: 10px; }
+.tune-group h3 .mini { margin-left: auto; }
+.tune-group .hint { margin: 0 0 12px; }
+.tune-fields { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 12px 22px; }
+.tune-field { display: flex; flex-direction: column; gap: 5px; padding: 8px 10px; border-radius: 8px; border: 1px solid transparent; }
+.tune-field.long { grid-column: 1 / -1; }
+.tune-field.changed { border-color: rgba(111, 214, 255, 0.35); background: rgba(111, 214, 255, 0.05); }
+.tune-field .lbl { display: flex; justify-content: space-between; gap: 8px; font-size: 14px; font-weight: 600; }
+.tune-field .def { font-size: 12px; color: var(--muted, #8aa); font-weight: 400; }
+.tune-field .row { display: flex; gap: 8px; align-items: center; }
+.tune-field input[type=range] { flex: 1; accent-color: var(--cyan); }
+.tune-field input[type=number] { width: 92px; }
+.tune-field input[type=color] { width: 44px; height: 32px; padding: 0; border: 1px solid var(--line); border-radius: 6px; background: none; cursor: pointer; }
+.tune-field input.hex { width: 96px; font-family: monospace; }
+.tune-field textarea { min-height: 70px; resize: vertical; }
+.tune-field .reset { padding: 2px 8px; font-size: 13px; visibility: hidden; }
+.tune-field.changed .reset { visibility: visible; }
+.tune-field .unit { font-size: 13px; color: var(--muted, #8aa); min-width: 12px; }
+.tune-empty { padding: 30px; text-align: center; color: var(--muted, #8aa); }
+.tune-field .row > textarea, .tune-field .row > input:not([type]) { flex: 1; width: 100%; }

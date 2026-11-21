@@ -10,6 +10,7 @@ import * as C from './content.js';
 import * as F from './flags.js';
 import * as M from './media.js';
 import * as MET from './metrics.js';
+import { applyTuning } from '../shared/tuning.js';
 import { SHIPS, MISSIONS, DIFFICULTY, MAX_PLAYERS, PLAYER_COLORS } from '../shared/config.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -336,7 +337,7 @@ function readRaw(req, limit) {
 async function handleApi(req, res, pathname) {
   if (pathname === '/api/content' && req.method === 'GET') {
     const c = C.getContent();
-    return json(res, 200, { site: c.site, announcement: c.announcement, settings: c.settings, sections: c.sections.filter((x) => x.visible), changelog: c.changelog, updatedAt: c.updatedAt,
+    return json(res, 200, { site: c.site, announcement: c.announcement, settings: c.settings, sections: c.sections.filter((x) => x.visible), changelog: c.changelog, tuning: c.tuning || {}, updatedAt: c.updatedAt,
       flags: F.gameFlags(), env: envInfo() });
   }
   if (!pathname.startsWith('/api/admin/')) return json(res, 404, { error: 'not found' });
@@ -365,12 +366,13 @@ async function handleApi(req, res, pathname) {
   if (route === 'content' && req.method === 'PUT') {
     let body; try { body = await readBody(req); } catch (e) { return json(res, 400, { error: e.message }); }
     const saved = C.saveContent(body, session.user);
+    applyTuningChange(saved.tuning);
     return json(res, 200, saved);
   }
   if (route === 'revisions' && req.method === 'GET') return json(res, 200, C.listRevisions());
   if (route === 'revisions/restore' && req.method === 'POST') {
     let body; try { body = await readBody(req, 4096); } catch { return json(res, 400, { error: 'bad request' }); }
-    try { return json(res, 200, C.restoreRevision(String(body.id || ''), session.user)); } catch { return json(res, 404, { error: 'Revision not found.' }); }
+    try { const r = C.restoreRevision(String(body.id || ''), session.user); applyTuningChange(r.tuning); return json(res, 200, r); } catch { return json(res, 404, { error: 'Revision not found.' }); }
   }
   if (route === 'password' && req.method === 'POST') {
     let body; try { body = await readBody(req, 4096); } catch { return json(res, 400, { error: 'bad request' }); }
@@ -503,6 +505,18 @@ setInterval(() => {
 }, 15000);
 
 // ---------------- flags: live updates to every player + lobby fix-ups ----------------
+// Live tuning: rewrite the shared config in this process, then tell every connected browser.
+let tuningJson = '';
+function applyTuningChange(tuning = {}) {
+  const clean = applyTuning(tuning);
+  const j = JSON.stringify(clean);
+  if (j === tuningJson) return;
+  tuningJson = j;
+  broadcastAll({ t: 'tuning', tuning: clean });
+  for (const room of rooms.values()) if (room.state === 'lobby') room.broadcastInfo();
+}
+applyTuning(C.getContent().tuning || {}); tuningJson = JSON.stringify(C.getContent().tuning || {});
+
 function applyFlagChange(flags = F.gameFlags()) {
   broadcastAll({ t: 'flags', flags });
   for (const room of rooms.values()) {

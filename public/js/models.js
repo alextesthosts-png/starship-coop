@@ -1,4 +1,5 @@
 // Procedural low-poly models (original designs). All ships face -Z.
+import { VISUALS } from '/shared/tuning.js';
 import * as THREE from 'three';
 import { DREAD, mulberry32 } from '/shared/world.js';
 import { panelMaterial, triplanarMaterial } from './textures.js';
@@ -55,10 +56,10 @@ function buildShipFromModel(type, color) {
   const exhausts = [];
   for (const e of empties) {
     const r = e.userData.plumeRadius || PLUME_RADIUS[type] || 0.6;
-    const ex = buildExhaust(color, r);
+    const ex = buildExhaust(VISUALS.plume[type] || color, r);
     e.add(ex);
     exhausts.push(ex);
-    const eg = engineGlow(color, r * 1.1);   // small nozzle flare only
+    const eg = engineGlow(VISUALS.plume[type] || color, r * 1.1);   // small nozzle flare only
     e.add(eg);
     engines.push(eg);
   }
@@ -158,7 +159,7 @@ export function buildExhaust(color, radius = 0.6) {
   let k = 0;
   g.userData.setThrust = (target, dt, time) => {
     k += (target - k) * Math.min(1, dt * 6);
-    const len = Math.min(radius * (3 + k * 14), 3 + k * 6.5);   // stays well in front of the chase camera
+    const len = Math.min(radius * (3 + k * 14), 3 + k * 6.5) * VISUALS.plumeLength;   // stays well in front of the chase camera
     outer.scale.set(radius, radius, len);
     inner.scale.set(radius * 0.55, radius * 0.55, len * 0.8);
     for (const m of [outer, inner]) { m.material.uniforms.uTime.value = time; m.material.uniforms.uPower.value = 0.55 + k * 0.6; }

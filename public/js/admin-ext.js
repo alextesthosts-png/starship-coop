@@ -1,4 +1,5 @@
-// Admin panel extensions: media library, ships & models, feature flags, server health.
+// Admin panel extensions: media library, ships & models, game tuning, feature flags, server health.
+import { TUNING_GROUPS, TUNING_FIELDS, tuningDefault } from '/shared/tuning.js';
 const $ = (id) => document.getElementById(id);
 let V = null;               // helpers from admin.js (api, toast, esc, getDoc, changed, fillBindings)
 let media = { status: null, items: [] };
@@ -12,6 +13,7 @@ window.addEventListener('vw-page', (e) => {
   if (e.detail === 'media') loadMedia();
   if (e.detail === 'ships') loadMedia().then(renderShips);
   if (e.detail === 'flags') loadFlags();
+  if (e.detail === 'tuning') renderTuning();
   if (e.detail === 'health') startHealth(); else stopHealth();
 });
 
@@ -392,3 +394,77 @@ function drawSpark(cv, pts) {
 }
 function niceMax(v) { const p = Math.pow(10, Math.floor(Math.log10(v))); const m = v / p; return (m <= 1 ? 1 : m <= 2 ? 2 : m <= 5 ? 5 : 10) * p; }
 function fmtNum(v) { return Math.abs(v) >= 1000 ? `${(v / 1000).toFixed(1)}k` : Math.abs(v) >= 10 ? Math.round(v).toString() : (+v.toFixed(2)).toString(); }
+
+
+// ================= GAME TUNING =================
+// Overrides live in doc.tuning as { key: value }; a key that's missing means "use the shipped default".
+const SECTIONS = [...new Set(TUNING_GROUPS.map((g) => g.section))];
+let tuneSection = SECTIONS[0];
+const tuning = () => (V.getDoc().tuning ??= {});
+const curVal = (k) => (k in tuning() ? tuning()[k] : tuningDefault(k));
+const isChanged = (k) => k in tuning();
+const fmtDef = (f, v) => f.type === 'color' ? (v || 'pilot colour') : f.type === 'number' ? `${v}${f.unit && f.unit !== '×' ? ` ${f.unit}` : f.unit}` : (String(v).length > 40 ? `${String(v).slice(0, 40)}…` : v);
+
+function setTune(k, v) {
+  const f = TUNING_FIELDS[k];
+  if (f.type === 'number') { v = Number(v); if (!Number.isFinite(v)) return; v = Math.min(f.max, Math.max(f.min, v)); }
+  if (f.type === 'text' && !String(v).trim()) v = tuningDefault(k);
+  if (v === tuningDefault(k)) delete tuning()[k]; else tuning()[k] = v;
+  V.changed();
+}
+function fieldHtml(k, f) {
+  const v = curVal(k), d = tuningDefault(k);
+  let input;
+  if (f.type === 'number') input = `<div class="row"><input type="range" min="${f.min}" max="${f.max}" step="${f.step}" value="${v}" data-tk="${k}"><input type="number" min="${f.min}" max="${f.max}" step="${f.step}" value="${v}" data-tk="${k}"><span class="unit">${esc(f.unit || '')}</span><button class="mini reset" data-treset="${k}" title="Back to default">↺</button></div>`;
+  else if (f.type === 'color') input = `<div class="row"><input type="color" value="${v || '#ffffff'}" data-tk="${k}"><input class="hex" value="${esc(v)}" placeholder="${f.allowEmpty ? 'pilot colour' : ''}" data-tk="${k}" maxlength="7"><button class="mini reset" data-treset="${k}" title="Back to default">↺</button></div>`;
+  else input = `<div class="row">${f.long ? `<textarea data-tk="${k}" maxlength="${f.max}">${esc(v)}</textarea>` : `<input data-tk="${k}" maxlength="${f.max}" value="${esc(v)}">`}<button class="mini reset" data-treset="${k}" title="Back to default">↺</button></div>`;
+  return `<div class="tune-field ${f.long ? 'long' : ''} ${isChanged(k) ? 'changed' : ''}" data-field="${k}"><div class="lbl"><span>${esc(f.label)}</span><span class="def">Default: ${esc(fmtDef(f, d))}</span></div>${input}</div>`;
+}
+function renderTuning() {
+  if (!V) return;
+  const q = $('tune-search').value.trim().toLowerCase(), onlyChanged = $('tune-changed').checked;
+  const count = (sec) => TUNING_GROUPS.filter((g) => g.section === sec).reduce((n, g) => n + Object.keys(g.fields).filter(isChanged).length, 0);
+  $('tune-sections').innerHTML = SECTIONS.map((sec) => `<button data-sec="${sec}" class="${sec === tuneSection && !q ? 'on' : ''}">${sec}${count(sec) ? `<span class="n">${count(sec)}</span>` : ''}</button>`).join('');
+  const groups = TUNING_GROUPS.map((g) => {
+    if (!q && g.section !== tuneSection) return '';
+    const keys = Object.keys(g.fields).filter((k) => (!onlyChanged || isChanged(k)) && (!q || `${g.title} ${g.section} ${g.fields[k].label}`.toLowerCase().includes(q)));
+    if (!keys.length) return '';
+    const changedN = Object.keys(g.fields).filter(isChanged).length;
+    return `<div class="card tune-group" data-group="${g.id}"><h3>${esc(q ? `${g.section} · ${g.title}` : g.title)}${changedN ? `<button class="mini" data-greset="${g.id}">Reset ${changedN} change${changedN > 1 ? 's' : ''}</button>` : ''}</h3>
+      <p class="hint small">${esc(g.hint)}</p><div class="tune-fields">${keys.map((k) => fieldHtml(k, g.fields[k])).join('')}</div></div>`;
+  }).join('');
+  $('tune-groups').innerHTML = groups || `<div class="card tune-empty">${onlyChanged ? 'Nothing changed yet: the game runs on its shipped defaults.' : 'No settings match.'}</div>`;
+}
+$('tune-sections').addEventListener('click', (e) => { const b = e.target.closest('[data-sec]'); if (!b) return; tuneSection = b.dataset.sec; $('tune-search').value = ''; renderTuning(); });
+$('tune-search').addEventListener('input', renderTuning);
+$('tune-changed').addEventListener('change', renderTuning);
+$('tune-reset-all').onclick = () => {
+  const n = Object.keys(tuning()).length;
+  if (!n) { V.toast('Already on the shipped defaults.'); return; }
+  if (!confirm(`Reset all ${n} tuning change${n > 1 ? 's' : ''} to the shipped defaults? Nothing is published until you press Save.`)) return;
+  V.getDoc().tuning = {}; V.changed(); renderTuning();
+};
+$('tune-groups').addEventListener('input', (e) => {
+  const el = e.target.closest('[data-tk]'); if (!el) return;
+  const k = el.dataset.tk, f = TUNING_FIELDS[k];
+  let v = el.value;
+  if (f.type === 'color') { v = v.trim().toLowerCase(); if (!(/^#[0-9a-f]{6}$/.test(v) || (f.allowEmpty && v === ''))) return; }
+  setTune(k, v);
+  // keep the twin input (slider + number, swatch + hex) in step, and mark the field
+  const box = el.closest('.tune-field');
+  box.querySelectorAll('[data-tk]').forEach((o) => { if (o !== el) o.value = f.type === 'color' && o.type === 'color' ? (curVal(k) || '#ffffff') : curVal(k); });
+  box.classList.toggle('changed', isChanged(k));
+  refreshTuneCounts();
+});
+function refreshTuneCounts() {
+  // update the badges without re-rendering the field the admin is typing in
+  const count = (sec) => TUNING_GROUPS.filter((g) => g.section === sec).reduce((n, g) => n + Object.keys(g.fields).filter(isChanged).length, 0);
+  $('tune-sections').querySelectorAll('[data-sec]').forEach((b) => { const n = count(b.dataset.sec); b.innerHTML = `${b.dataset.sec}${n ? `<span class="n">${n}</span>` : ''}`; });
+}
+$('tune-groups').addEventListener('click', (e) => {
+  const r = e.target.closest('[data-treset]');
+  if (r) { delete tuning()[r.dataset.treset]; V.changed(); renderTuning(); return; }
+  const g = e.target.closest('[data-greset]');
+  if (g) { const grp = TUNING_GROUPS.find((x) => x.id === g.dataset.greset); for (const k of Object.keys(grp.fields)) delete tuning()[k]; V.changed(); renderTuning(); }
+});
+window.addEventListener('vw-saved', () => { if (!$('p-tuning').classList.contains('hidden')) renderTuning(); });

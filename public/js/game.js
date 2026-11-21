@@ -5,6 +5,7 @@ import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
 import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 import { SHIPS, WEAPONS, ENEMIES, MISSIONS, DIFFICULTY } from '/shared/config.js';
+import { VISUALS } from '/shared/tuning.js';
 import { DREAD, insideBox, spawnPoint, terrainHeight } from '/shared/world.js';
 import { buildShip, buildEntity, engineGlow } from './models.js';
 import { buildPlanetEnv, buildSpaceEnv } from './env.js';
@@ -18,7 +19,9 @@ const UP = new THREE.Vector3(0, 1, 0);
 const ZERO = new THREE.Vector3();
 const INTERP_DELAY = 110;
 
-const TEAM_COLORS = { enemy: new THREE.Color(3, 0.5, 0.35), heavy: new THREE.Color(3, 1.2, 0.3), wing: new THREE.Color(0.6, 3, 1.2) };
+// Bolt colours are HDR (×3) so they bloom. Hex values come straight from the admin panel.
+const hdr = (hex, k = 3) => { const n = parseInt(String(hex).slice(1), 16); return new THREE.Color(((n >> 16) & 255) / 255 * k, ((n >> 8) & 255) / 255 * k, (n & 255) / 255 * k); };
+const TEAM_COLORS = { get enemy() { return hdr(VISUALS.enemyLaser); }, get heavy() { return hdr(VISUALS.heavyLaser); }, get wing() { return hdr(VISUALS.wingLaser); } };
 const EXPLO_SCALE = { raider: 1.2, bomber: 1.6, wing: 1.2, gunship: 3, freighter: 4, turret: 1.8, generator: 3.5, core: 6, tower: 3.5 };
 
 function segSphere(p0, p1, c, r) {
@@ -71,9 +74,10 @@ export class Game {
 
     this.composer = new EffectComposer(renderer);
     this.composer.addPass(new RenderPass(this.scene, this.camera));
-    this.bloom = new UnrealBloomPass(new THREE.Vector2(window.innerWidth, window.innerHeight), 0.85, 0.5, 0.82);
+    this.bloom = new UnrealBloomPass(new THREE.Vector2(window.innerWidth, window.innerHeight), VISUALS.bloomStrength, 0.5, VISUALS.bloomThreshold);
     this.composer.addPass(this.bloom);
     this.composer.addPass(new OutputPass());
+    this.renderer.toneMappingExposure = VISUALS.exposure;
 
     // local ship
     const me = this.players.get(myId);
@@ -322,7 +326,7 @@ export class Game {
     if (p.kind === 'flak') { p.len = 3; p.width = 0.8; }
     p.len = p.len || 7; p.width = p.width || 1;
     if (!p.bolt) {
-      const col = p.kind === 'missile' ? 0xffaa55 : p.kind === 'bomb' ? 0x66aaff : 0xff4422;
+      const col = p.kind === 'missile' ? VISUALS.missile : p.kind === 'bomb' ? VISUALS.bomb : 0xff4422;
       p.mesh = engineGlow(col, p.kind === 'bomb' ? 9 : p.kind === 'ebomb' ? 8 : 4);
       p.mesh.position.copy(p.pos);
       this.scene.add(p.mesh);
@@ -695,7 +699,7 @@ export class Game {
       const desired = this.ship.position.clone().add(off);
       cam.position.lerp(desired, 1 - Math.exp(-dt * 14));
       cam.quaternion.slerp(this.ship.quaternion, 1 - Math.exp(-dt * 9));
-      const fov = 70 + (this.me.boosting ? 12 : 0) + (this.me.speed / this.def.boostSpeed) * 4;
+      const fov = VISUALS.fov + (this.me.boosting ? VISUALS.boostFov : 0) + (this.me.speed / this.def.boostSpeed) * 4;
       cam.fov += (fov - cam.fov) * (1 - Math.exp(-dt * 4));
       cam.updateProjectionMatrix();
     } else {
@@ -716,7 +720,7 @@ export class Game {
       }
     }
     if (this.shake > 0) {
-      const s = this.shake * 1.2;
+      const s = this.shake * 1.2 * VISUALS.shake;
       cam.position.add(new THREE.Vector3((Math.random() - 0.5) * s, (Math.random() - 0.5) * s, (Math.random() - 0.5) * s));
       this.shake = Math.max(0, this.shake - dt * 1.8);
     }
@@ -810,7 +814,15 @@ export class Game {
     ctx.stroke();
   }
 
+  // Called when an admin saves new tuning while this mission is running.
+  applyLooks() {
+    this.bloom.strength = VISUALS.bloomStrength;
+    this.bloom.threshold = VISUALS.bloomThreshold;
+    this.renderer.toneMappingExposure = VISUALS.exposure;
+  }
+
   dispose() {
+    this.renderer.toneMappingExposure = 1;
     this.running = false;
     window.removeEventListener('resize', this.onResize);
     this.sfx.stopEngine();

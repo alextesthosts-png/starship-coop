@@ -261,7 +261,7 @@ async function save() {
   try {
     doc = await api('PUT', 'content', doc);
     savedJson = JSON.stringify(doc);
-    renderAll(); toast('Saved: the site is updated.');
+    renderAll(); toast('Saved: the site is updated.'); window.dispatchEvent(new Event('vw-saved'));
   } catch (e) { updateStatus(`Save failed: ${e.message}`, 'err'); }
 }
 $('btn-save').onclick = save;

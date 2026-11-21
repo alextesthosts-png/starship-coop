@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
+import { sanitizeTuning } from '../shared/tuning.js';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 export const DATA_DIR = process.env.DATA_DIR || (fs.existsSync('/data') ? '/data' : path.join(ROOT, 'data'));
@@ -38,7 +39,13 @@ export const DEFAULT_CONTENT = {
   },
   sections: [],
   changelog: [
-    { id: 'v1-7', version: 'v1.7', date: '21 Nov 2026', title: '', latest: true, items: [
+    { id: 'v1-8', version: 'v1.8', date: '21 Nov 2026', title: '', latest: true, items: [
+      '**Game tuning** in the admin panel: about 120 settings for ships, weapons, enemies, difficulty levels, mission texts, colours, camera and skies, all live with no redeploy.',
+      'Rename ships and missions, rebalance speed, hull, shields and cannons, make pirates tougher or faster, and add reserve ships per difficulty.',
+      'Change pilot and laser colours, engine plume colour and length, glow, brightness, field of view, camera shake, the planet sky and the space nebulae.',
+      'Changes reach every open game within a second (skies from the next launch), and every save can be rolled back from History.',
+    ] },
+    { id: 'v1-7', version: 'v1.7', date: '21 Nov 2026', title: '', latest: false, items: [
       '**Media library** in the admin panel, stored in a Railway bucket: upload images and 3D ship models by drag and drop, preview them, copy links and see where each file is used.',
       '**Custom ship models:** swap any ship\'s model for an uploaded GLB. A built-in inspector shows a 3D preview, triangle count, size, engine/gun markers and tips before you publish.',
       '**Announcement banner images**, a menu **background image**, and images inside custom sections (`![caption](link)`).',
@@ -126,7 +133,8 @@ export function normalize(input) {
     items: (Array.isArray(r?.items) ? r.items : []).map((t) => str(t, 800).trim()).filter(Boolean).slice(0, 60),
   }));
   const knownReleases = (Array.isArray(input?.knownReleases) ? input.knownReleases : []).filter((x) => typeof x === 'string').slice(0, 500);
-  return { site, announcement, settings, sections, changelog, knownReleases, updatedAt: input?.updatedAt || null, updatedBy: input?.updatedBy || null };
+  const tuning = sanitizeTuning(input?.tuning);
+  return { site, announcement, settings, sections, changelog, tuning, knownReleases, updatedAt: input?.updatedAt || null, updatedBy: input?.updatedBy || null };
 }
 
 // ---------------- load / save ----------------

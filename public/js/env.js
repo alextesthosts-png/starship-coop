@@ -1,4 +1,5 @@
 // Environment builders: planet surface and deep space.
+import { VISUALS } from '/shared/tuning.js';
 import * as THREE from 'three';
 import { PLANET, terrainHeight, TOWERS, asteroids, CONVOY, DREAD, insideBox, mulberry32 } from '/shared/world.js';
 import { mat, buildDreadnought, buildJumpGate } from './models.js';
@@ -86,11 +87,12 @@ function bandedPlanet(radius, c1, c2, c3, atmo) {
 
 export function buildPlanetEnv(scene) {
   const sunDir = new THREE.Vector3(-0.5, 0.35, -0.8).normalize();
-  scene.add(skyDome(0x2b4a7a, 0xe8a070, sunDir, 0xffd9a0));
-  scene.fog = new THREE.Fog(0xd8a080, 900, 7500);
+  const P = VISUALS.planet;
+  scene.add(skyDome(P.skyTop, P.skyHorizon, sunDir, 0xffd9a0));
+  scene.fog = new THREE.Fog(P.fog, 900, P.fogFar);
   const hemi = new THREE.HemisphereLight(0xbcd4ff, 0x6a4a30, 0.9);
   scene.add(hemi);
-  const sun = new THREE.DirectionalLight(0xffe2b8, 2.4);
+  const sun = new THREE.DirectionalLight(P.sun, P.sunIntensity);
   sun.position.copy(sunDir).multiplyScalar(1000);
   scene.add(sun);
 
@@ -180,12 +182,13 @@ export function buildPlanetEnv(scene) {
 
 export function buildSpaceEnv(scene, missionId) {
   const isConvoy = missionId === 'convoy';
-  scene.add(nebulaSphere(isConvoy ? 0x3a60c0 : 0xb03a60, isConvoy ? 0x40a0a0 : 0x5a30a0, isConvoy ? 1.7 : 4.2));
+  const SP = VISUALS.space;
+  scene.add(nebulaSphere(isConvoy ? SP.convoyA : SP.dreadA, isConvoy ? SP.convoyB : SP.dreadB, isConvoy ? 1.7 : 4.2));
   scene.add(starfield());
   scene.fog = null;
   scene.add(new THREE.AmbientLight(0x404a60, 0.9));
   scene.add(new THREE.HemisphereLight(0x8090c0, 0x302020, 0.6));
-  const sun = new THREE.DirectionalLight(0xfff0e0, 2.6);
+  const sun = new THREE.DirectionalLight(SP.sun, SP.sunIntensity);
   sun.position.set(1, 0.4, 0.3).multiplyScalar(1000);
   scene.add(sun);
 

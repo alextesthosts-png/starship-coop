@@ -44,6 +44,7 @@
         <button data-page="changelog">Changelog</button>
         <button data-page="media">Media library</button>
         <button data-page="ships">Ships &amp; models</button>
+        <button data-page="tuning">Game tuning</button>
         <button data-page="flags">Feature flags</button>
         <button data-page="health">Server health</button>
         <button data-page="settings">Settings</button>
@@ -161,6 +162,14 @@
         </div>
 
         <!-- Feature flags -->
+        <div class="page hidden" id="p-tuning">
+          <div class="page-head-row"><h2>Game tuning</h2>
+            <div class="tune-tools"><input id="tune-search" type="search" placeholder="Search settings…"><label class="chk"><input type="checkbox" id="tune-changed"> Changed only</label><button class="mini danger" id="tune-reset-all">Reset all</button></div></div>
+          <p class="hint">Change how the game plays and looks, then press <b>Save</b>. Every open game picks it up within a second: no redeploy. Ship, weapon and enemy changes count from the next shot or spawn; skies and nebulae from the next mission launch. Each save is kept in History, so you can roll back.</p>
+          <div class="seg" id="tune-sections"></div>
+          <div id="tune-groups"></div>
+        </div>
+
         <div class="page hidden" id="p-flags">
           <h2>Feature flags</h2>
           <p class="hint">Switch missions, ships and events on or off for everyone, instantly — no redeploy. Players see changes within seconds; missions already in flight finish with the rules they started with.</p>

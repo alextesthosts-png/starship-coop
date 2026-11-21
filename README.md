@@ -39,6 +39,7 @@ Deploys on Railway as-is (`npm start`, listens on `$PORT`, health check `/health
 - **Two services** in one project: `vanguard-wing` (Node game server) and `vanguard-forum` (PHP + SQLite, built from `forum/`).
 - **Volumes:** `/data` on each service (admin content, flags, metrics history; forum database and sessions).
 - **Bucket** `vanguard-media`: admin media library (images, GLB ship models) served same-origin at `/media/…`.
+- **Game tuning:** `shared/tuning.js` lists every live-tunable value (ships, weapons, enemies, difficulty, mission texts, colours, camera, skies). Overrides are saved with the site content on the `/data` volume and pushed to every open game over the WebSocket, so balance and looks change without a redeploy.
 - **Feature flags:** `vw.mission.*`, `vw.ship.*`, `vw.event.*`, read with the `railway` SDK when `RAILWAY_TOKEN`
   (a project token) is set; admin overrides win and every change is pushed live to players.
 - **Metrics:** in-process request/error/latency/memory/CPU/game-loop metrics plus Railway's CPU/memory/network

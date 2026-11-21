@@ -9,6 +9,7 @@ import { Hud, esc } from './hud.js';
 import { Input } from './input.js';
 import { Game } from './game.js';
 import { setAnisotropy } from './textures.js';
+import { applyTuning } from '/shared/tuning.js';
 
 const $ = (id) => document.getElementById(id);
 const show = (id, on = true) => $(id).classList.toggle('hidden', !on);
@@ -84,6 +85,7 @@ function onMessage(m) {
     case 'error': $('menu-error').textContent = m.msg; toast(m.msg); break;
     case 'chat': addChat(m); break;
     case 'flags': applyFlags(m.flags, true); break;
+    case 'tuning': applyGameTuning(m.tuning, true); break;
     case 'start': startGame(m); break;
     case 'pjoin': S.game && S.game.onPlayerJoin(m.player); break;
     case 's': if (S.game) { S.game.onSnapshot(m); if (m.ev) S.game.onEvents(m.ev); } break;
@@ -116,9 +118,9 @@ function pips(n) { return `<div class="pips">${Array.from({ length: 5 }, (_, i) 
 function renderShipSelect(el) {
   el.innerHTML = Object.entries(SHIPS).map(([k, s]) => `
     <div class="ship-card ${k === S.ship ? 'sel' : ''} ${S.flags.ships[k] ? '' : 'off'}" data-ship="${k}">
-      <div class="nm">${s.name}${S.flags.ships[k] ? '' : ' <span class="grounded">Grounded</span>'}</div><div class="rl">${s.role}</div>
+      <div class="nm">${esc(s.name)}${S.flags.ships[k] ? '' : ' <span class="grounded">Grounded</span>'}</div><div class="rl">${esc(s.role)}</div>
       <div class="st"><span>SPD</span>${pips(s.stats.speed)}<span>ARM</span>${pips(s.stats.armor)}<span>FPW</span>${pips(s.stats.firepower)}<span>HDL</span>${pips(s.stats.handling)}</div>
-    </div>`).join('') + `<div class="ship-desc" style="grid-column:1/-1">${SHIPS[S.ship].desc}</div>`;
+    </div>`).join('') + `<div class="ship-desc" style="grid-column:1/-1">${esc(SHIPS[S.ship].desc)}</div>`;
   el.querySelectorAll('.ship-card').forEach((c) => c.addEventListener('click', () => selectShip(c.dataset.ship)));
 }
 function selectShip(k) {
@@ -171,6 +173,16 @@ function openTab(id) {
 document.querySelector('.tabs').addEventListener('click', (e) => { const t = e.target.closest('.tab'); if (t && t.dataset.tab) openTab(t.dataset.tab); });
 
 // ---------------- feature flags (live) ----------------
+function applyGameTuning(t, live = false) {
+  applyTuning(t || {});
+  for (const o of $('diff').options) if (DIFFICULTY[o.value]) o.textContent = DIFFICULTY[o.value].label;
+  renderShipSelect($('ship-select'));
+  renderShipSelect($('ship-select-lobby'));
+  if (S.room) renderLobby();
+  if (S.game?.applyLooks) S.game.applyLooks();
+  if (live) toast('Command retuned the fleet.');
+}
+
 function applyFlags(flags, live = false) {
   const before = JSON.stringify(S.flags);
   S.flags = flags;
@@ -229,6 +241,7 @@ function applyContent(c) {
   if (st.background) { bg.style.backgroundImage = `url("${encodeURI(st.background)}")`; bg.style.setProperty('--dim', st.backgroundDim ?? 0.55); bg.classList.remove('hidden'); }
   else bg.classList.add('hidden');
   if (st.shipModels) setShipModels(st.shipModels);
+  applyGameTuning(c.tuning);
   if (c.flags) applyFlags(c.flags);
   if (c.env?.preview) {
     const rb = $('preview-ribbon');
@@ -275,7 +288,7 @@ function renderLobby() {
   const slots = [];
   for (let i = 0; i < 4; i++) {
     const p = r.players.find((q) => q.slot === i);
-    if (p) slots.push(`<div class="pl"><span class="dot" style="background:${p.color}"></span><span class="nm">${esc(p.name)}${p.id === r.hostId ? ' <span title="Wing leader">★</span>' : ''}${p.id === S.myId ? ' <span class="muted">(you)</span>' : ''}</span><span class="sh">${SHIPS[p.ship].name}</span><span class="rd ${p.ready ? 'yes' : ''}">${p.ready ? 'READY' : 'NOT READY'}</span></div>`);
+    if (p) slots.push(`<div class="pl"><span class="dot" style="background:${p.color}"></span><span class="nm">${esc(p.name)}${p.id === r.hostId ? ' <span title="Wing leader">★</span>' : ''}${p.id === S.myId ? ' <span class="muted">(you)</span>' : ''}</span><span class="sh">${esc(SHIPS[p.ship].name)}</span><span class="rd ${p.ready ? 'yes' : ''}">${p.ready ? 'READY' : 'NOT READY'}</span></div>`);
     else slots.push(`<div class="pl empty"><span class="dot" style="background:#333"></span><span class="nm">Open slot — AI wingmates fill in</span></div>`);
   }
   $('player-list').innerHTML = slots.join('');
@@ -294,7 +307,7 @@ function renderLobby() {
   $('public').disabled = !host;
   $('mission-list').innerHTML = MISSIONS.map((m, i) => `
     <div class="mission ${m.id === r.missionId ? 'sel' : ''} ${host ? '' : 'locked'} ${S.flags.missions[m.id] ? '' : 'off'}" data-id="${m.id}">
-      <div class="mn">${i + 1}. ${m.name}${S.flags.missions[m.id] ? '' : ' <span class="grounded">Offline</span>'}</div><div class="ml">${m.location}</div>
+      <div class="mn">${i + 1}. ${esc(m.name)}${S.flags.missions[m.id] ? '' : ' <span class="grounded">Offline</span>'}</div><div class="ml">${esc(m.location)}</div>
     </div>`).join('');
   $('mission-list').querySelectorAll('.mission').forEach((el) => el.addEventListener('click', () => {
     if (!isHost()) return;
@@ -303,9 +316,9 @@ function renderLobby() {
     net.send({ t: 'mission', missionId: el.dataset.id, diff: $('diff').value });
   }));
   const m = MISSIONS.find((x) => x.id === r.missionId);
-  $('briefing').innerHTML = `<p>${m.briefing}</p><div class="sub-h">Primary objectives</div><ul>${m.primary.map((o) => `<li>${o}</li>`).join('')}</ul>
+  $('briefing').innerHTML = `<p>${esc(m.briefing)}</p><div class="sub-h">Primary objectives</div><ul>${m.primary.map((o) => `<li>${o}</li>`).join('')}</ul>
     <div class="sub-h">Bonus objectives (medals)</div><ul class="bonus">${m.bonus.map((o) => `<li>${o}</li>`).join('')}</ul>
-    <div class="muted">Difficulty: ${DIFFICULTY[r.diff].label} · Reserve ships scale with wing size.</div>`;
+    <div class="muted">Difficulty: ${esc(DIFFICULTY[r.diff].label)} · Reserve ships scale with wing size.</div>`;
 }
 $('diff').onchange = () => net.send({ t: 'mission', missionId: S.room.missionId, diff: $('diff').value });
 $('public').onchange = () => net.send({ t: 'mission', missionId: S.room.missionId, diff: $('diff').value, isPublic: $('public').checked });
@@ -427,7 +440,7 @@ function showDebrief(m) {
     $('deb-obj').innerHTML = m.objectives.map((o) => `<div class="obj ${o.status} ${o.bonus ? 'bonus' : ''}"><span class="i">${o.status === 'done' ? '✔' : '✖'}</span>${esc(o.text)} ${o.progress ? `<span class="p">${esc(o.progress)}</span>` : ''}</div>`).join('');
     const rows = [...m.stats].sort((a, b) => b.score - a.score);
     $('deb-stats').innerHTML = `<tr><th>Pilot</th><th>Ship</th><th>Kills</th><th>Accuracy</th><th>Shot down</th><th>Score</th></tr>` +
-      rows.map((s, i) => `<tr><td style="color:${s.color};font-weight:700">${i === 0 && s.score > 0 ? '🏆 ' : ''}${esc(s.name)}</td><td>${SHIPS[s.ship].name}</td><td>${s.kills}</td><td>${s.accuracy}%</td><td>${s.deaths}</td><td><b>${s.score}</b></td></tr>`).join('');
+      rows.map((s, i) => `<tr><td style="color:${s.color};font-weight:700">${i === 0 && s.score > 0 ? '🏆 ' : ''}${esc(s.name)}</td><td>${esc(SHIPS[s.ship].name)}</td><td>${s.kills}</td><td>${s.accuracy}%</td><td>${s.deaths}</td><td><b>${s.score}</b></td></tr>`).join('');
     sfx.fanfare(m.success);
   }, 600);
 }
