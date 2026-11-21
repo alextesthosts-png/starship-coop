@@ -137,8 +137,8 @@
           <p class="hint">Images and 3D models stored in your Railway bucket. Use them for the announcement banner, the menu background, section text (<code>![caption](link)</code>) and ship models.</p>
           <div class="card media-status" id="media-status"></div>
           <label class="dropzone" id="dropzone">
-            <input type="file" id="media-file" multiple accept=".png,.jpg,.jpeg,.webp,.gif,.glb,image/png,image/jpeg,image/webp,image/gif,model/gltf-binary" />
-            <b>Drop files here</b> or click to choose<br><span class="hint">PNG, JPEG, WebP, GIF up to 10 MB · GLB models up to 40 MB</span>
+            <input type="file" id="media-file" multiple accept=".png,.jpg,.jpeg,.webp,.gif,.glb,.obj,.mtl,.zip,image/png,image/jpeg,image/webp,image/gif,model/gltf-binary" />
+            <b>Drop files here</b> or click to choose<br><span class="hint">PNG, JPEG, WebP, GIF up to 10 MB · GLB models up to 40 MB · OBJ models: drop a .zip, or the .obj with its .mtl and textures, and it is converted to GLB for you</span>
           </label>
           <div id="uploads"></div>
           <div class="media-tools"><div class="seg" id="media-filter"><button data-f="all" class="on">All</button><button data-f="image">Images</button><button data-f="model">Models</button></div>
@@ -149,7 +149,7 @@
         <!-- Ships & models -->
         <div class="page hidden" id="p-ships">
           <h2>Ships &amp; models</h2>
-          <p class="hint">Swap a ship's 3D model for one from the media library. Players load it the next time they open the game. The inspector shows what the game needs: engine markers (<code>engine_*</code>), gun markers (<code>gun_*</code>), size and materials.</p>
+          <p class="hint">Swap the 3D model of any ship or structure, player and pirate alike, for one from the media library. Uploaded models are scaled and centred to the built-in model's size automatically, so hitboxes and gun positions still fit. Players load them the next time they open the game. The inspector shows what the game needs: engine markers (<code>engine_*</code>), gun markers (<code>gun_*</code>), size and materials.</p>
           <div id="ship-models"></div>
           <details class="card"><summary><b>How to prepare a model in Blender</b></summary>
             <ol class="howto">
@@ -211,6 +211,7 @@
               <label class="switch"><input type="checkbox" data-bind="settings.showOpenWings" /> <span>Show “Open Wings”</span></label>
               <label class="switch"><input type="checkbox" data-bind="settings.showHowTo" /> <span>Show “How to Play”</span></label>
               <label class="switch"><input type="checkbox" data-bind="settings.showChangelog" /> <span>Show “Changelog”</span></label>
+              <label class="switch"><input type="checkbox" data-bind="settings.showAdminLink" /> <span>Show “Admin” button on the main page</span></label>
               <label class="fld"><span>Tab opened by default</span><select data-bind="settings.defaultTab" id="default-tab"></select></label>
             </div>
             <div class="card">

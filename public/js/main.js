@@ -254,6 +254,7 @@ function applyContent(c) {
   const tabs = document.querySelector('.tabs');
   tabs.querySelectorAll('.tab.custom').forEach((t) => t.remove());
   $('custom-sections').innerHTML = '';
+  $('admin-link').classList.toggle('hidden', st.showAdminLink === false);
   const vis = { rooms: st.showOpenWings !== false, howto: st.showHowTo !== false, changelog: st.showChangelog !== false };
   tabs.querySelectorAll('.tab[data-key]').forEach((t) => t.classList.toggle('hidden', !vis[t.dataset.key]));
   for (const sec of c.sections || []) {

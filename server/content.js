@@ -4,6 +4,7 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { sanitizeTuning } from '../shared/tuning.js';
+import { MODEL_SLOTS } from '../shared/config.js';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 export const DATA_DIR = process.env.DATA_DIR || (fs.existsSync('/data') ? '/data' : path.join(ROOT, 'data'));
@@ -34,12 +35,19 @@ export const DEFAULT_CONTENT = {
     showOpenWings: true, showHowTo: true, showChangelog: true,
     defaultTab: 'rooms',
     background: '', backgroundDim: 0.55,
-    shipModels: { lancer: '', warden: '', hammer: '' },
+    shipModels: {},
+    showAdminLink: true,
     maintenance: { enabled: false, message: 'We are upgrading the hangar. New games are paused for a few minutes.' },
   },
   sections: [],
   changelog: [
-    { id: 'v1-8', version: 'v1.8', date: '21 Nov 2026', title: '', latest: true, items: [
+    { id: 'v1-9', version: 'v1.9', date: '21 Nov 2026', title: '', latest: true, items: [
+      '**Every model is swappable:** besides the three player ships, admins can now replace the AI wingmates, relay towers, raiders, pirate bombers, gunships, freighters, turrets, shield generators, reactor core and the Ravager itself.',
+      'Uploaded models are scaled and centred to the size of the model they replace, so hitboxes and guns still line up, and get an engine glow at the tail if they have no engine markers.',
+      '**OBJ models:** drop a .zip (or an .obj with its .mtl and textures) in the media library. The admin panel converts it to GLB in your browser, with a preview, orientation controls and texture size options.',
+      '**Admin** button on the main page (can be hidden in Settings).',
+    ] },
+    { id: 'v1-8', version: 'v1.8', date: '21 Nov 2026', title: '', latest: false, items: [
       '**Game tuning** in the admin panel: about 120 settings for ships, weapons, enemies, difficulty levels, mission texts, colours, camera and skies, all live with no redeploy.',
       'Rename ships and missions, rebalance speed, hull, shields and cannons, make pirates tougher or faster, and add reserve ships per difficulty.',
       'Change pilot and laser colours, engine plume colour and length, glow, brightness, field of view, camera shake, the planet sky and the space nebulae.',
@@ -125,7 +133,8 @@ export function normalize(input) {
     defaultTab: tabIds.includes(st.defaultTab) ? st.defaultTab : 'rooms',
     background: mediaUrl(st.background, 'images'),
     backgroundDim: typeof st.backgroundDim === 'number' || typeof st.backgroundDim === 'string' ? Math.min(0.9, Math.max(0, +st.backgroundDim || 0)) : 0.55,
-    shipModels: Object.fromEntries(['lancer', 'warden', 'hammer'].map((k) => [k, mediaUrl(st.shipModels?.[k], 'models')])),
+    shipModels: Object.fromEntries(Object.keys(MODEL_SLOTS).map((k) => [k, mediaUrl(st.shipModels?.[k], 'models')])),
+    showAdminLink: bool(st.showAdminLink, true),
     maintenance: { enabled: bool(st.maintenance?.enabled), message: str(st.maintenance?.message, 300, d.settings.maintenance.message) },
   };
   const changelog = (Array.isArray(input?.changelog) ? input.changelog : []).slice(0, 200).map((r, i) => ({

@@ -110,3 +110,21 @@ export const MISSIONS = [
 ];
 
 export const SCORE = { medalBonus: 1000 };
+
+// Every craft or structure whose 3D model can be swapped from the admin panel.
+// Custom models are scaled to the built-in model's size, so hitboxes still match.
+export const MODEL_SLOTS = {
+  lancer:     { name: 'Lancer', role: 'Interceptor (player)', group: 'Player ships' },
+  warden:     { name: 'Warden', role: 'Heavy fighter (player)', group: 'Player ships' },
+  hammer:     { name: 'Hammer', role: 'Bomber (player)', group: 'Player ships' },
+  wing:       { name: 'AI wingmate', role: 'Allied fighter', group: 'Allies' },
+  tower:      { name: 'Relay tower', role: 'Defend in Outpost Siege', group: 'Allies' },
+  raider:     { name: 'Raider', role: 'Pirate fighter', group: 'Pirates' },
+  bomber:     { name: 'Pirate bomber', role: 'Pirate bomber', group: 'Pirates' },
+  gunship:    { name: 'Gunship', role: 'Pirate heavy', group: 'Pirates' },
+  freighter:  { name: 'Freighter', role: 'Convoy cargo ship', group: 'Pirates' },
+  turret:     { name: 'Defense turret', role: 'Ravager hull turret', group: 'Pirates' },
+  generator:  { name: 'Shield generator', role: 'Ravager objective', group: 'Pirates' },
+  core:       { name: 'Reactor core', role: 'Ravager final target', group: 'Pirates' },
+  dreadnought:{ name: 'Ravager', role: 'Pirate dreadnought (looks only)', group: 'Pirates' },
+};

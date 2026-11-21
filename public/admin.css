@@ -162,3 +162,11 @@ table.kv { width: 100%; border-collapse: collapse; font-size: 15px; } table.kv t
 .tune-field .unit { font-size: 13px; color: var(--muted, #8aa); min-width: 12px; }
 .tune-empty { padding: 30px; text-align: center; color: var(--muted, #8aa); }
 .tune-field .row > textarea, .tune-field .row > input:not([type]) { flex: 1; width: 100%; }
+
+/* ---------- all model slots + OBJ converter ---------- */
+.slot-group { margin: 22px 0 8px; font-size: 15px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted, #8aa); }
+.slot-group:first-child { margin-top: 4px; }
+.obj-opts { display: flex; flex-direction: column; gap: 10px; margin: 12px 0; }
+.obj-opts .row2 { display: flex; gap: 10px; }
+.obj-opts .row2 > * { flex: 1; }
+#obj-result { margin-top: 10px; }

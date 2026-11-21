@@ -1,5 +1,6 @@
 // Admin panel extensions: media library, ships & models, game tuning, feature flags, server health.
 import { TUNING_GROUPS, TUNING_FIELDS, tuningDefault } from '/shared/tuning.js';
+import { MODEL_SLOTS } from '/shared/config.js';
 const $ = (id) => document.getElementById(id);
 let V = null;               // helpers from admin.js (api, toast, esc, getDoc, changed, fillBindings)
 let media = { status: null, items: [] };
@@ -96,6 +97,13 @@ dz.addEventListener('drop', (e) => uploadFiles([...e.dataTransfer.files]));
 $('media-file').onchange = (e) => { uploadFiles([...e.target.files]); e.target.value = ''; };
 function uploadFiles(files) {
   if (!media.status?.configured) { V.toast('No bucket connected here.'); return; }
+  // .obj packages (a .zip, or .obj + .mtl + textures) go through the converter first
+  if (files.some((f) => /\.(obj|zip)$/i.test(f.name))) {
+    const pkg = files.filter((f) => /\.(obj|zip|mtl)$/i.test(f.name) || (/\.(png|jpe?g|webp|gif|bmp|tga)$/i.test(f.name) && files.some((g) => /\.obj$/i.test(g.name))));
+    openObjConverter(pkg);
+    files = files.filter((f) => !pkg.includes(f));
+    if (!files.length) return;
+  }
   let chain = Promise.resolve();
   for (const f of files) chain = chain.then(() => uploadOne(f));
   chain.then(() => loadMedia());
@@ -166,7 +174,7 @@ async function openModelInspector(m, onUse) {
   if (onUse) onUse($('use-slot'));
   viewer = await makeViewer($('viewer'), m.url);
 }
-async function makeViewer(el, url) {
+async function makeViewer(el, src) {
   const THREE = await import('three');
   const { GLTFLoader } = await import('three/addons/loaders/GLTFLoader.js');
   const { OrbitControls } = await import('three/addons/controls/OrbitControls.js');
@@ -185,8 +193,8 @@ async function makeViewer(el, url) {
   let running = true;
   const disposeAll = () => { running = false; controls.dispose(); renderer.dispose(); pmrem.dispose(); };
   try {
-    const gltf = await new GLTFLoader().loadAsync(url);
-    const root = gltf.scene; scene.add(root);
+    const root = typeof src === 'string' ? (await new GLTFLoader().loadAsync(src)).scene : src;
+    scene.add(root);
     const box = new THREE.Box3().setFromObject(root); const size = box.getSize(new THREE.Vector3()); const c = box.getCenter(new THREE.Vector3());
     const R = Math.max(size.x, size.y, size.z) || 1;
     root.traverse((o) => {
@@ -203,19 +211,22 @@ async function makeViewer(el, url) {
 }
 
 // ================= SHIPS & MODELS =================
-const SHIP_INFO = { lancer: ['Lancer', 'Interceptor', '/models/lancer.glb'], warden: ['Warden', 'Heavy fighter', '/models/warden.glb'], hammer: ['Hammer', 'Bomber', null] };
+const BUILTIN_GLB = { lancer: '/models/lancer.glb', warden: '/models/warden.glb' };
 function renderShips() {
   const d = V.getDoc(); const models = media.items.filter((m) => m.kind === 'model');
-  $('ship-models').innerHTML = Object.entries(SHIP_INFO).map(([k, [name, role, builtin]]) => {
+  const groups = [...new Set(Object.values(MODEL_SLOTS).map((x) => x.group))];
+  $('ship-models').innerHTML = groups.map((grp) => `<h3 class="slot-group">${esc(grp)}</h3>` + Object.entries(MODEL_SLOTS).filter(([, x]) => x.group === grp).map(([k, { name, role }]) => {
+    const builtin = BUILTIN_GLB[k];
     const cur = d.settings.shipModels?.[k] || '';
     const m = models.find((x) => x.url === cur);
     const opts = [`<option value="">Built-in ${builtin ? 'model' : '(procedural)'}</option>`, ...models.map((x) => `<option value="${esc(x.url)}" ${x.url === cur ? 'selected' : ''}>${esc(x.name)}</option>`)].join('');
     const notes = m?.report?.warnings?.length ? `<div class="warn-box small">${m.report.warnings.map((w) => `<div>⚠ ${esc(w)}</div>`).join('')}</div>` : cur ? '<div class="ok-box small">✓ Ready</div>' : '';
-    return `<div class="card ship-row" data-ship="${k}"><div class="ship-name"><b>${name}</b><span class="hint">${role}</span></div>
+    const extra = k === 'dreadnought' && cur ? '<div class="hint small">The Ravager\'s turrets, generators and hitbox keep their built-in places, so use a model with a similar shape.</div>' : '';
+    return `<div class="card ship-row" data-ship="${k}"><div class="ship-name"><b>${esc(name)}</b><span class="hint">${esc(role)}</span></div>
       <label class="fld grow"><span>3D model</span><select data-ship-model="${k}">${opts}</select></label>
       <div class="ship-btns">${cur ? '<button class="mini" data-act="inspect">Inspect</button>' : builtin ? '<button class="mini" data-act="inspect-builtin">View built-in</button>' : ''}</div>
-      <div class="ship-notes">${notes}${cur && !m ? '<div class="warn-box small">⚠ This file is no longer in the library.</div>' : ''}</div></div>`;
-  }).join('') + (models.length ? '' : '<p class="hint">Upload a .glb in the Media library to offer it here.</p>');
+      <div class="ship-notes">${notes}${extra}${cur && !m ? '<div class="warn-box small">⚠ This file is no longer in the library.</div>' : ''}</div></div>`;
+  }).join('')).join('') + (models.length ? '' : '<p class="hint">Upload a .glb, or an .obj package (.zip), in the Media library to offer it here.</p>');
 }
 $('ship-models').addEventListener('change', (e) => {
   const k = e.target.dataset.shipModel; if (!k) return;
@@ -229,7 +240,7 @@ $('ship-models').addEventListener('click', async (e) => {
   if (b.dataset.act === 'inspect-builtin') {
     let report = {};
     try { report = await V.api('GET', `inspect-builtin?ship=${k}`); } catch (err) { report = { warnings: [`Couldn't read the model's details: ${err.message}`] }; }
-    openModelInspector({ name: `${SHIP_INFO[k][0]} (built-in)`, url: SHIP_INFO[k][2], report });
+    openModelInspector({ name: `${MODEL_SLOTS[k].name} (built-in)`, url: BUILTIN_GLB[k], report });
   }
 });
 
@@ -468,3 +479,68 @@ $('tune-groups').addEventListener('click', (e) => {
   if (g) { const grp = TUNING_GROUPS.find((x) => x.id === g.dataset.greset); for (const k of Object.keys(grp.fields)) delete tuning()[k]; V.changed(); renderTuning(); }
 });
 window.addEventListener('vw-saved', () => { if (!$('p-tuning').classList.contains('hidden')) renderTuning(); });
+
+
+// ================= OBJ CONVERTER =================
+// Turns an .obj package into a .glb in the browser, then uploads it like any other model.
+async function openObjConverter(files) {
+  openModal('Convert an OBJ model', `<div class="inspector"><div class="viewer" id="viewer"><div class="hint">Reading files…</div></div>
+    <div class="inspect-side" id="obj-side"><p class="hint">Unpacking and reading the model. Large files can take a few seconds.</p></div></div>`);
+  let C, pkg, loaded, view;
+  try {
+    C = await import('/js/obj-convert.js');
+    pkg = await C.readPackage(files);
+    const names = C.objNames(pkg);
+    if (!names.length) throw new Error('There is no .obj file in what you dropped. Drop a .zip that contains one, or the .obj with its .mtl and textures together.');
+    loaded = await C.loadObj(pkg, names[0]);
+  } catch (e) { $('obj-side').innerHTML = `<div class="err-box">${esc(e.message)}</div>`; $('viewer').innerHTML = ''; return; }
+  const st = loaded.stats;
+  const baseName = C.objNames(pkg)[0].replace(/\.obj$/i, '').replace(/[^\w.-]+/g, '-').slice(0, 40) || 'model';
+  const warn = [];
+  if (st.triangles > 150000) warn.push(`${st.triangles.toLocaleString()} triangles is very heavy for a game craft (the Lancer has 27,560). With several on screen, players on slower computers will lose frame rate. Reduce it in Blender with a Decimate modifier, then convert again.`);
+  else if (st.triangles > 60000) warn.push(`${st.triangles.toLocaleString()} triangles is on the heavy side. Fine for one big ship, but too much for a fighter that appears many times.`);
+  if (!st.hasMtl) warn.push('No .mtl file, so the model has no materials or textures. Include the .mtl (and its images) to keep its look.');
+  if (st.missing.length) warn.push(`Missing textures: ${st.missing.slice(0, 6).join(', ')}${st.missing.length > 6 ? '…' : ''}. Add them to the zip or drop them together with the .obj.`);
+  const axisOpt = (sel) => ['-z', '+z', '-x', '+x', '-y', '+y'].map((a) => `<option ${a === sel ? 'selected' : ''}>${a}</option>`).join('');
+  $('obj-side').innerHTML = `<table class="kv"><tr><td>Model</td><td>${esc(C.objNames(pkg)[0])}</td></tr><tr><td>Triangles</td><td>${st.triangles.toLocaleString()}</td></tr>
+    <tr><td>Materials</td><td>${st.materials}</td></tr><tr><td>Textures found</td><td>${st.textures}</td></tr></table>
+    ${warn.length ? `<div class="warn-box small">${warn.map((w) => `<div>⚠ ${esc(w)}</div>`).join('')}</div>` : '<div class="ok-box small">✓ Ready to convert</div>'}
+    <div class="obj-opts">
+      <label class="fld"><span>Name</span><input id="obj-name" value="${esc(baseName)}" maxlength="40"></label>
+      <div class="row2"><label class="fld"><span>Nose points to</span><select id="obj-fwd">${axisOpt('-z')}</select></label>
+      <label class="fld"><span>Top points to</span><select id="obj-up">${axisOpt('+y')}</select></label></div>
+      <div class="row2"><button class="mini" id="obj-turn">↻ Turn 90°</button><button class="mini" id="obj-flip">⇅ Flip upright</button></div>
+      <label class="fld"><span>Max texture size</span><select id="obj-tex"><option>1024</option><option selected>2048</option><option>4096</option></select></label>
+      <label class="switch"><input type="checkbox" id="obj-keep" checked> <span>Keep the model's own look (no pilot colour)</span></label>
+    </div>
+    <p class="hint small">Turn the model until its nose follows the cyan arrow and its top faces up. The game scales it to fit the ship it replaces, and adds an engine glow at the tail if it has no engine markers.</p>
+    <button class="btn" id="obj-go">Convert &amp; upload</button><div id="obj-result"></div>`;
+  const preview = () => {
+    const fwd = $('obj-fwd').value, up = $('obj-up').value;
+    if (!C.orientation(fwd, up)) { $('obj-result').innerHTML = '<div class="warn-box small">Nose and top can\'t be on the same axis.</div>'; return; }
+    $('obj-result').innerHTML = '';
+    view?.dispose();
+    view = null;
+    makeViewer($('viewer'), C.prepareForExport(loaded.root, { forward: fwd, up, keepLook: $('obj-keep').checked })).then((v) => { view = v; viewer = v; });
+  };
+  const ring = ['-z', '-x', '+z', '+x'];
+  $('obj-turn').onclick = () => { const f = $('obj-fwd').value; const i = ring.indexOf(f); $('obj-fwd').value = i < 0 ? '-z' : ring[(i + 1) % 4]; preview(); };
+  $('obj-flip').onclick = () => { const u = $('obj-up').value; $('obj-up').value = u[0] === '+' ? `-${u[1]}` : `+${u[1]}`; preview(); };
+  ['obj-fwd', 'obj-up'].forEach((id) => { $(id).onchange = preview; });
+  preview();
+  $('obj-go').onclick = async () => {
+    const btn = $('obj-go'); btn.disabled = true; btn.textContent = 'Converting…';
+    try {
+      const holder = C.prepareForExport(loaded.root, { forward: $('obj-fwd').value, up: $('obj-up').value, keepLook: $('obj-keep').checked });
+      const buf = await C.exportGlb(holder, { maxTextureSize: +$('obj-tex').value });
+      const name = `${($('obj-name').value || baseName).replace(/[^\w.-]+/g, '-')}.glb`;
+      if (buf.byteLength > 40 * 1048576) throw new Error(`The converted model is ${fmtBytes(buf.byteLength)}, over the 40 MB limit. Pick a smaller texture size or reduce the triangle count.`);
+      $('obj-result').innerHTML = `<p class="hint small">Converted to ${fmtBytes(buf.byteLength)}. Uploading…</p>`;
+      await uploadOne(new File([buf], name, { type: 'model/gltf-binary' }));
+      await loadMedia();
+      const m = media.items.find((x) => x.name === name || x.url.endsWith(`-${name}`));
+      $('obj-result').innerHTML = m ? `<div class="ok-box small">✓ Uploaded as ${esc(m.name)}. Pick it on <b>Ships &amp; models</b>.</div>` : '<div class="ok-box small">✓ Uploaded. See the upload list for details.</div>';
+      btn.textContent = 'Done';
+    } catch (e) { $('obj-result').innerHTML = `<div class="err-box small">${esc(e.message)}</div>`; btn.disabled = false; btn.textContent = 'Convert & upload'; }
+  };
+}
