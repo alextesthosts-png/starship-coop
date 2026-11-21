@@ -14,7 +14,7 @@ export const SHIPS = {
     pitch: 1.9, yaw: 1.35, roll: 3.4,
     hull: 80, shield: 70, shieldRegen: 12,
     laserDmg: 9, laserRate: 0.10, laserSpeed: 950,
-    guns: [[-2.2, -0.2, -2.5], [2.2, -0.2, -2.5]], gunMode: 'alternate',
+    guns: [[-6.12, -0.42, -4.0], [6.12, -0.42, -4.0]], gunMode: 'alternate',
     secondary: 'missile', secAmmo: 6, secRegen: 5,
     stats: { speed: 5, armor: 2, firepower: 3, handling: 5 },
   },

@@ -2,6 +2,49 @@
 import * as THREE from 'three';
 import { DREAD, mulberry32 } from '/shared/world.js';
 import { panelMaterial, triplanarMaterial } from './textures.js';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+
+// ---------------- GLB ship models (authored in Blender) ----------------
+// Material names in the GLB decide the in-game look:
+//   *Hull -> textured hull panels, *Accent -> player colour, *Dark -> dark panels,
+//   *Canopy -> glass, *Glow -> engine glow. Empties named engine_* get an engine flare.
+const SHIP_FILES = { lancer: '/models/lancer.glb' };
+const shipModels = {};
+let preloadPromise = null;
+export function preloadShipModels() {
+  if (preloadPromise) return preloadPromise;
+  const loader = new GLTFLoader();
+  preloadPromise = Promise.all(Object.entries(SHIP_FILES).map(([k, url]) =>
+    loader.loadAsync(url).then((g) => { shipModels[k] = g.scene; }).catch((e) => console.warn('ship model failed', k, e))));
+  return preloadPromise;
+}
+function buildShipFromModel(type, color) {
+  const src = shipModels[type];
+  const g = src.clone(true);
+  const engines = [];
+  const accent = panelMaterial(color, { metalness: 0.4, roughness: 0.4 });
+  const hullM = panelMaterial(0xd6dbe2, { metalness: 0.5, roughness: 0.45 });
+  const darkM = panelMaterial(0x50565f, { metalness: 0.6, roughness: 0.5, repeat: 2 });
+  const canopy = mat(0x10243a, { emissive: 0x2a7fff, ei: 0.35, metal: 0.9, rough: 0.15 });
+  const glowM = glow(color, 2.2);
+  const empties = [];
+  g.traverse((o) => {
+    if (o.isMesh) {
+      const pick = (m) => {
+        const n = (m && m.name) || '';
+        return n.endsWith('Accent') ? accent : n.endsWith('Dark') ? darkM : n.endsWith('Canopy') ? canopy : n.endsWith('Glow') ? glowM : hullM;
+      };
+      o.material = Array.isArray(o.material) ? o.material.map(pick) : pick(o.material);
+    } else if (/^engine/i.test(o.name)) empties.push(o);
+  });
+  for (const e of empties) {
+    const eg = engineGlow(color, 2.8);
+    e.add(eg);
+    engines.push(eg);
+  }
+  g.userData.engines = engines;
+  return g;
+}
 
 const matCache = new Map();
 export function mat(color, { emissive = 0x000000, ei = 1, metal = 0.35, rough = 0.55, flat = true, transparent = false, opacity = 1 } = {}) {
@@ -57,6 +100,7 @@ function wedge(w, h, l, taper = 0.3) {
 
 // ---------------- player ships ----------------
 export function buildShip(type, color) {
+  if (shipModels[type]) return buildShipFromModel(type, color);
   const g = new THREE.Group();
   const accent = panelMaterial(color, { metalness: 0.4, roughness: 0.4 });
   const hullM = panelMaterial(0xd6dbe2, { metalness: 0.5, roughness: 0.45 });

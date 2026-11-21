@@ -1,7 +1,7 @@
 // App shell: networking, menus, lobby, debrief, and the menu backdrop scene.
 import * as THREE from 'three';
 import { SHIPS, MISSIONS, DIFFICULTY } from '/shared/config.js';
-import { buildShip } from './models.js';
+import { buildShip, preloadShipModels } from './models.js';
 import { Sfx } from './audio.js';
 import { Hud, esc } from './hud.js';
 import { Input } from './input.js';
@@ -222,7 +222,7 @@ function startGame(m) {
   show('loading', true);
   stopPreview();
   // let the loading screen paint before heavy scene construction
-  setTimeout(() => {
+  preloadShipModels().then(() => {
     try {
       S.game = new Game({ renderer, net, sfx, hud, input, start: m, myId: S.myId });
     } catch (err) {
@@ -233,7 +233,7 @@ function startGame(m) {
     input.enabled = true;
     input.lock();
     updateClickPrompt();
-  }, 30);
+  });
 }
 function endGame() {
   if (S.game) { S.game.dispose(); S.game = null; }
@@ -323,7 +323,8 @@ function setPreview(k) {
   if (!preview) return;
   if (preview.ship) preview.scene.remove(preview.ship);
   preview.ship = buildShip(k, '#4fc3ff');
-  preview.ship.scale.setScalar(k === 'hammer' ? 0.85 : 1);
+  preview.ship.scale.setScalar(k === 'hammer' ? 0.85 : k === 'lancer' ? 0.72 : 1);
+  preview.ship.position.x = -3.5;
   preview.scene.add(preview.ship);
 }
 function startPreview() {
@@ -354,7 +355,7 @@ function startPreview() {
     if (preview.ship) {
       preview.ship.rotation.y = preview.t * 0.4 + 0.6;
       preview.ship.rotation.z = Math.sin(preview.t * 0.7) * 0.15;
-      preview.ship.position.y = Math.sin(preview.t * 1.1) * 0.4;
+      preview.ship.position.y = 4.2 + Math.sin(preview.t * 1.1) * 0.4;
     }
     stars.rotation.y = preview.t * 0.005;
     renderer.toneMapping = THREE.ACESFilmicToneMapping;
@@ -369,6 +370,7 @@ function stopPreview() { if (preview) { preview.running = false; preview.cam.cle
 renderShipSelect($('ship-select'));
 renderShipSelect($('ship-select-lobby'));
 startPreview();
+preloadShipModels().then(() => setPreview(S.ship));
 setScreen('menu');
 net.connect();
 window.__vw = S; // debug handle
