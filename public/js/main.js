@@ -1,7 +1,7 @@
 // App shell: networking, menus, lobby, debrief, and the menu backdrop scene.
 import * as THREE from 'three';
 import { SHIPS, MISSIONS, DIFFICULTY } from '/shared/config.js';
-import { buildShip, preloadShipModels, setBakedEnvironment } from './models.js';
+import { buildShip, preloadShipModels, setBakedEnvironment, setShipModels } from './models.js';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import { render as renderMarkup, inline as inlineMarkup, escapeHtml } from '/shared/markup.js';
 import { Sfx } from './audio.js';
@@ -24,6 +24,8 @@ const S = {
   pendingJoin: new URLSearchParams(location.search).get('room'),
 };
 if (!SHIPS[S.ship]) S.ship = 'lancer';
+S.flags = { missions: { siege: true, convoy: true, dread: true }, ships: { lancer: true, warden: true, hammer: true }, doubleScore: false, extraReserves: false, aiWingmates: true };
+let resolveContent; const contentReady = new Promise((r) => { resolveContent = r; });
 
 const sfx = new Sfx();
 const canvas = $('gl');
@@ -65,6 +67,7 @@ function onMessage(m) {
   switch (m.t) {
     case 'welcome':
       S.myId = m.id;
+      if (m.flags) applyFlags(m.flags);
       net.send({ t: 'hello', name: S.name || `Pilot-${m.id}`, ship: S.ship });
       if (S.pendingJoin) { net.send({ t: 'join', code: S.pendingJoin }); S.pendingJoin = null; }
       break;
@@ -80,6 +83,7 @@ function onMessage(m) {
     case 'left': S.room = null; history.replaceState(null, '', '/'); setScreen('menu'); break;
     case 'error': $('menu-error').textContent = m.msg; toast(m.msg); break;
     case 'chat': addChat(m); break;
+    case 'flags': applyFlags(m.flags, true); break;
     case 'start': startGame(m); break;
     case 'pjoin': S.game && S.game.onPlayerJoin(m.player); break;
     case 's': if (S.game) { S.game.onSnapshot(m); if (m.ev) S.game.onEvents(m.ev); } break;
@@ -111,13 +115,14 @@ function toast(text) {
 function pips(n) { return `<div class="pips">${Array.from({ length: 5 }, (_, i) => `<i class="${i < n ? 'on' : ''}"></i>`).join('')}</div>`; }
 function renderShipSelect(el) {
   el.innerHTML = Object.entries(SHIPS).map(([k, s]) => `
-    <div class="ship-card ${k === S.ship ? 'sel' : ''}" data-ship="${k}">
-      <div class="nm">${s.name}</div><div class="rl">${s.role}</div>
+    <div class="ship-card ${k === S.ship ? 'sel' : ''} ${S.flags.ships[k] ? '' : 'off'}" data-ship="${k}">
+      <div class="nm">${s.name}${S.flags.ships[k] ? '' : ' <span class="grounded">Grounded</span>'}</div><div class="rl">${s.role}</div>
       <div class="st"><span>SPD</span>${pips(s.stats.speed)}<span>ARM</span>${pips(s.stats.armor)}<span>FPW</span>${pips(s.stats.firepower)}<span>HDL</span>${pips(s.stats.handling)}</div>
     </div>`).join('') + `<div class="ship-desc" style="grid-column:1/-1">${SHIPS[S.ship].desc}</div>`;
   el.querySelectorAll('.ship-card').forEach((c) => c.addEventListener('click', () => selectShip(c.dataset.ship)));
 }
 function selectShip(k) {
+  if (!S.flags.ships[k]) { toast(`The ${SHIPS[k].name} is grounded right now.`); return; }
   S.ship = k;
   localStorage.setItem('vw_ship', k);
   sfx.init(); sfx.ui();
@@ -165,6 +170,26 @@ function openTab(id) {
 }
 document.querySelector('.tabs').addEventListener('click', (e) => { const t = e.target.closest('.tab'); if (t && t.dataset.tab) openTab(t.dataset.tab); });
 
+// ---------------- feature flags (live) ----------------
+function applyFlags(flags, live = false) {
+  const before = JSON.stringify(S.flags);
+  S.flags = flags;
+  if (!S.flags.ships[S.ship]) {
+    const next = Object.keys(S.flags.ships).find((k) => S.flags.ships[k]);
+    if (next) { S.ship = next; localStorage.setItem('vw_ship', next); net.send({ t: 'ship', ship: next }); setPreview(next); }
+  }
+  renderShipSelect($('ship-select'));
+  renderShipSelect($('ship-select-lobby'));
+  if (S.room) renderLobby();
+  const ev = [];
+  if (flags.doubleScore) ev.push('⚡ Double score event is live');
+  if (flags.extraReserves) ev.push('🛡 +2 reserve ships per mission');
+  const strip = $('event-strip');
+  strip.innerHTML = ev.map((e) => `<span>${e}</span>`).join('');
+  strip.classList.toggle('hidden', !ev.length);
+  if (live && before !== JSON.stringify(flags)) toast('Command updated the flight roster.');
+}
+
 // ---------------- editable site content (from the admin panel) ----------------
 S.maintenance = null;
 function setText(id, v) { const el = document.getElementById(id); if (el && typeof v === 'string' && v) el.textContent = v; }
@@ -197,7 +222,19 @@ function applyContent(c) {
   if (S.maintenance) parts.push({ style: 'warning', html: `<p><b>Maintenance:</b> ${inlineMarkup(S.maintenance)}</p>` });
   if (c.announcement?.enabled && c.announcement.text) parts.push({ style: c.announcement.style, html: renderMarkup(c.announcement.text) });
   an.classList.toggle('hidden', !parts.length);
+  if (c.announcement?.enabled && c.announcement.image) parts.splice(S.maintenance ? 1 : 0, 0, { style: c.announcement.style, html: `<img class="announce-img" src="${escapeHtml(c.announcement.image)}" alt="">` });
+  an.classList.toggle('hidden', !parts.length);
   if (parts.length) { an.className = `announce ${parts[0].style}`; an.innerHTML = parts.map((p) => p.html).join(''); }
+  const bg = $('page-bg');
+  if (st.background) { bg.style.backgroundImage = `url("${encodeURI(st.background)}")`; bg.style.setProperty('--dim', st.backgroundDim ?? 0.55); bg.classList.remove('hidden'); }
+  else bg.classList.add('hidden');
+  if (st.shipModels) setShipModels(st.shipModels);
+  if (c.flags) applyFlags(c.flags);
+  if (c.env?.preview) {
+    const rb = $('preview-ribbon');
+    rb.textContent = `PREVIEW${c.env.branch ? ` · ${c.env.branch}` : ''}${c.env.commit ? ` · ${c.env.commit}` : ''}`;
+    rb.classList.remove('hidden');
+  }
   document.querySelector('.launch-card').classList.toggle('maint', !!S.maintenance);
   for (const id of ['btn-quick', 'btn-create', 'btn-join']) $(id).disabled = !!S.maintenance;
   // tabs: built-in visibility + custom sections
@@ -227,7 +264,7 @@ function applyContent(c) {
   document.querySelector('.info-card').classList.toggle('hidden', !visibleTabs.length);
   if (want) openTab(want.dataset.tab);
 }
-fetch('/api/content').then((r) => r.json()).then(applyContent).catch(() => {});
+fetch('/api/content').then((r) => r.json()).then(applyContent).catch(() => {}).finally(() => resolveContent());
 
 // ---------------- lobby ----------------
 function isHost() { return S.room && S.room.hostId === S.myId; }
@@ -256,11 +293,12 @@ function renderLobby() {
   $('public').checked = r.isPublic;
   $('public').disabled = !host;
   $('mission-list').innerHTML = MISSIONS.map((m, i) => `
-    <div class="mission ${m.id === r.missionId ? 'sel' : ''} ${host ? '' : 'locked'}" data-id="${m.id}">
-      <div class="mn">${i + 1}. ${m.name}</div><div class="ml">${m.location}</div>
+    <div class="mission ${m.id === r.missionId ? 'sel' : ''} ${host ? '' : 'locked'} ${S.flags.missions[m.id] ? '' : 'off'}" data-id="${m.id}">
+      <div class="mn">${i + 1}. ${m.name}${S.flags.missions[m.id] ? '' : ' <span class="grounded">Offline</span>'}</div><div class="ml">${m.location}</div>
     </div>`).join('');
   $('mission-list').querySelectorAll('.mission').forEach((el) => el.addEventListener('click', () => {
     if (!isHost()) return;
+    if (!S.flags.missions[el.dataset.id]) { toast('That mission is offline right now.'); return; }
     sfx.ui();
     net.send({ t: 'mission', missionId: el.dataset.id, diff: $('diff').value });
   }));
@@ -300,7 +338,7 @@ function startGame(m) {
   show('loading', true);
   stopPreview();
   // let the loading screen paint before heavy scene construction
-  preloadShipModels().then(() => {
+  contentReady.then(() => preloadShipModels()).then(() => {
     try {
       S.game = new Game({ renderer, net, sfx, hud, input, start: m, myId: S.myId });
     } catch (err) {
@@ -449,7 +487,7 @@ function stopPreview() { if (preview) { preview.running = false; preview.cam.cle
 renderShipSelect($('ship-select'));
 renderShipSelect($('ship-select-lobby'));
 startPreview();
-preloadShipModels().then(() => setPreview(S.ship));
+contentReady.then(() => preloadShipModels()).then(() => setPreview(S.ship));
 setScreen('menu');
 net.connect();
 window.__vw = S; // debug handle

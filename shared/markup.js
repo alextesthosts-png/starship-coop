@@ -1,14 +1,16 @@
 // Tiny, safe text formatting used for admin-edited content (landing sections, changelog).
 // Everything is HTML-escaped first; only a few markers are turned back into tags:
-//   **bold**   *italic*   `code`   [link text](https://example.com)
+//   **bold**   *italic*   `code`   [link text](https://example.com)   ![alt](/media/images/…)
 //   lines starting with "- " become a bulleted list, "## " a heading, blank lines split paragraphs.
 
 export function escapeHtml(s) {
   return String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 }
 
+const IMG = /!\[([^\]]*)\]\((\/media\/images\/[\w.-]+)\)/g;   // only files from our own media library
 export function inline(text) {
   let s = escapeHtml(text);
+  s = s.replace(IMG, (m, alt, url) => `<img class="md-img" src="${url}" alt="${alt}" loading="lazy">`);
   s = s.replace(/`([^`]+)`/g, '<code>$1</code>');
   s = s.replace(/\*\*([^*]+)\*\*/g, '<b>$1</b>');
   s = s.replace(/(^|[^*])\*([^*\s][^*]*)\*/g, '$1<i>$2</i>');

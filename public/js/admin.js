@@ -47,6 +47,8 @@ async function openApp() {
   me = await api('GET', 'me');
   doc = await api('GET', 'content');
   savedJson = JSON.stringify(doc);
+  window.VW = { api, toast, esc, getDoc: () => doc, changed, fillBindings, me };
+  window.dispatchEvent(new Event('vw-ready'));
   $('login').classList.add('hidden'); $('app').classList.remove('hidden');
   $('pw-user').value = me.user || 'admin';
   renderAll();
@@ -88,6 +90,7 @@ $('side').addEventListener('click', (e) => {
   document.querySelectorAll('#side button').forEach((x) => x.classList.toggle('on', x === b));
   document.querySelectorAll('.page').forEach((p) => p.classList.toggle('hidden', p.id !== `p-${b.dataset.page}`));
   if (b.dataset.page === 'history') renderRevisions();
+  window.dispatchEvent(new CustomEvent('vw-page', { detail: b.dataset.page }));
   window.scrollTo(0, 0);
 });
 

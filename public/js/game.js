@@ -45,6 +45,7 @@ export class Game {
     this.players = new Map(start.players.map((p) => [p.id, p]));
     this.slot = start.slot;
     this.reserves = start.reserves;
+    this.scoreMul = start.scoreMul || 1;
     this.serverTime = start.time || 0;
     this.missionTime = this.serverTime - 4;
     this.entities = new Map();
@@ -228,7 +229,7 @@ export class Game {
         this.removeEntity(ev.id);
         const label = ev.type.toUpperCase();
         if (ev.by === this.myId && ev.team === 'enemy') {
-          const pts = ENEMIES[ev.type].score;
+          const pts = ENEMIES[ev.type].score * (this.scoreMul || 1);
           this.me.score += pts;
           this.hud.popup(`+${pts}`);
           this.hud.killFeed(`You destroyed a ${label} <b>+${pts}</b>`, '#9fe8ff');

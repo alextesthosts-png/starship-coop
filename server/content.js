@@ -27,16 +27,26 @@ export const DEFAULT_CONTENT = {
     forumUrl: process.env.FORUM_URL || 'https://vanguard-forum-production.up.railway.app',
     forumLabel: 'Community Forum',
   },
-  announcement: { enabled: false, text: '', style: 'info' },
+  announcement: { enabled: false, text: '', style: 'info', image: '' },
   settings: {
     accent: '#6fd6ff',
     showOpenWings: true, showHowTo: true, showChangelog: true,
     defaultTab: 'rooms',
+    background: '', backgroundDim: 0.55,
+    shipModels: { lancer: '', warden: '', hammer: '' },
     maintenance: { enabled: false, message: 'We are upgrading the hangar. New games are paused for a few minutes.' },
   },
   sections: [],
   changelog: [
-    { id: 'v1-6', version: 'v1.6', date: '21 Nov 2026', title: '', latest: true, items: [
+    { id: 'v1-7', version: 'v1.7', date: '21 Nov 2026', title: '', latest: true, items: [
+      '**Media library** in the admin panel, stored in a Railway bucket: upload images and 3D ship models by drag and drop, preview them, copy links and see where each file is used.',
+      '**Custom ship models:** swap any ship\'s model for an uploaded GLB. A built-in inspector shows a 3D preview, triangle count, size, engine/gun markers and tips before you publish.',
+      '**Announcement banner images**, a menu **background image**, and images inside custom sections (`![caption](link)`).',
+      '**Feature flags:** switch missions, ships and events (double score, extra reserves, AI wingmates) on and off live, powered by Railway feature flags with admin overrides.',
+      '**Server health** page: requests, error rate, response times, memory, CPU, game-loop timing, players online, forum uptime and Railway platform metrics.',
+      '**Preview builds:** pull requests can get their own temporary copy of the game, clearly marked with a PREVIEW ribbon.',
+    ] },
+    { id: 'v1-6', version: 'v1.6', date: '21 Nov 2026', title: '', latest: false, items: [
       '**Community forum** is open: create an account with your callsign and favourite ship, find wingmates, share tactics, report bugs and suggest features.',
       'Categories for announcements, looking-for-wingmates, tactics, ships, bug reports and suggestions; search, quotes and profiles.',
       'Wing Leaders (moderators) and Command (admins) can pin, lock, move and delete threads, ban accounts and manage categories.',
@@ -95,7 +105,8 @@ export function normalize(input) {
   for (const [k, max] of Object.entries(limits)) site[k] = str(s[k], max, d.site[k]);
   if (site.forumUrl && !/^https?:\/\//.test(site.forumUrl)) site.forumUrl = '';   // only real web links
   const a = input?.announcement || {};
-  const announcement = { enabled: bool(a.enabled), text: str(a.text, 500), style: ['info', 'success', 'warning'].includes(a.style) ? a.style : 'info' };
+  const mediaUrl = (v, kind) => (typeof v === 'string' && new RegExp(`^/media/${kind}/[\\w.-]+$`).test(v) ? v : '');
+  const announcement = { enabled: bool(a.enabled), text: str(a.text, 500), style: ['info', 'success', 'warning'].includes(a.style) ? a.style : 'info', image: mediaUrl(a.image, 'images') };
   const st = input?.settings || {};
   const sections = (Array.isArray(input?.sections) ? input.sections : []).slice(0, 12).map((x, i) => ({
     id: slug(x?.id, i), title: str(x?.title, 40, 'Section') || 'Section', body: str(x?.body, 10000), visible: bool(x?.visible, true),
@@ -105,6 +116,9 @@ export function normalize(input) {
     accent: typeof st.accent === 'string' && /^#[0-9a-fA-F]{6}$/.test(st.accent) ? st.accent.toLowerCase() : d.settings.accent,
     showOpenWings: bool(st.showOpenWings, true), showHowTo: bool(st.showHowTo, true), showChangelog: bool(st.showChangelog, true),
     defaultTab: tabIds.includes(st.defaultTab) ? st.defaultTab : 'rooms',
+    background: mediaUrl(st.background, 'images'),
+    backgroundDim: typeof st.backgroundDim === 'number' || typeof st.backgroundDim === 'string' ? Math.min(0.9, Math.max(0, +st.backgroundDim || 0)) : 0.55,
+    shipModels: Object.fromEntries(['lancer', 'warden', 'hammer'].map((k) => [k, mediaUrl(st.shipModels?.[k], 'models')])),
     maintenance: { enabled: bool(st.maintenance?.enabled), message: str(st.maintenance?.message, 300, d.settings.maintenance.message) },
   };
   const changelog = (Array.isArray(input?.changelog) ? input.changelog : []).slice(0, 200).map((r, i) => ({

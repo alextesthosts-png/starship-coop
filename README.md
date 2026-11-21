@@ -34,3 +34,14 @@ npm start          # http://localhost:3000
 npm test           # headless 2-bot smoke test of all missions
 ```
 Deploys on Railway as-is (`npm start`, listens on `$PORT`, health check `/health`).
+
+## Railway features used
+- **Two services** in one project: `vanguard-wing` (Node game server) and `vanguard-forum` (PHP + SQLite, built from `forum/`).
+- **Volumes:** `/data` on each service (admin content, flags, metrics history; forum database and sessions).
+- **Bucket** `vanguard-media`: admin media library (images, GLB ship models) served same-origin at `/media/…`.
+- **Feature flags:** `vw.mission.*`, `vw.ship.*`, `vw.event.*`, read with the `railway` SDK when `RAILWAY_TOKEN`
+  (a project token) is set; admin overrides win and every change is pushed live to players.
+- **Metrics:** in-process request/error/latency/memory/CPU/game-loop metrics plus Railway's CPU/memory/network
+  via the public GraphQL API (same `RAILWAY_TOKEN`) on the admin "Server health" page.
+- **PR environments:** every pull request can get a temporary copy (enable in Project Settings → Environments);
+  the game shows a PREVIEW ribbon there. CI (`.github/workflows/ci.yml`) runs the co-op smoke test on PRs.

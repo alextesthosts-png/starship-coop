@@ -9,6 +9,7 @@
   <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@700;900&family=Rajdhani:wght@500;600;700&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="/style.css" />
   <link rel="stylesheet" href="/admin.css" />
+  <script type="importmap">{ "imports": { "three": "/vendor/three/build/three.module.js", "three/addons/": "/vendor/three/examples/jsm/" } }</script>
 </head>
 <body class="admin">
   <!-- login -->
@@ -41,6 +42,10 @@
         <button data-page="announce">Announcement</button>
         <button data-page="sections">Custom sections</button>
         <button data-page="changelog">Changelog</button>
+        <button data-page="media">Media library</button>
+        <button data-page="ships">Ships &amp; models</button>
+        <button data-page="flags">Feature flags</button>
+        <button data-page="health">Server health</button>
         <button data-page="settings">Settings</button>
         <button data-page="history">History</button>
         <button data-page="account">Account</button>
@@ -101,6 +106,9 @@
             </label>
             <label class="fld"><span>Text</span><textarea data-bind="announcement.text" rows="5" maxlength="500" placeholder="e.g. **Double score weekend!** Fly any mission this weekend…"></textarea></label>
             <div class="fmt-help">Formatting: <code>**bold**</code> <code>*italic*</code> <code>`code`</code> <code>[link](https://…)</code> <code>- list item</code></div>
+            <div class="fld"><span>Banner image (optional)</span>
+              <div class="pick-row"><img id="ann-img-thumb" class="pick-thumb hidden" alt=""><button type="button" class="btn small" data-pick="announcement.image">Choose image…</button><button type="button" class="btn small ghost" data-clear="announcement.image">Remove</button></div>
+            </div>
             <h4>Preview</h4>
             <div id="announce-preview"></div>
           </div>
@@ -122,6 +130,58 @@
           <div id="releases"></div>
         </div>
 
+        <!-- Media library -->
+        <div class="page hidden" id="p-media">
+          <h2>Media library</h2>
+          <p class="hint">Images and 3D models stored in your Railway bucket. Use them for the announcement banner, the menu background, section text (<code>![caption](link)</code>) and ship models.</p>
+          <div class="card media-status" id="media-status"></div>
+          <label class="dropzone" id="dropzone">
+            <input type="file" id="media-file" multiple accept=".png,.jpg,.jpeg,.webp,.gif,.glb,image/png,image/jpeg,image/webp,image/gif,model/gltf-binary" />
+            <b>Drop files here</b> or click to choose<br><span class="hint">PNG, JPEG, WebP, GIF up to 10 MB · GLB models up to 40 MB</span>
+          </label>
+          <div id="uploads"></div>
+          <div class="media-tools"><div class="seg" id="media-filter"><button data-f="all" class="on">All</button><button data-f="image">Images</button><button data-f="model">Models</button></div>
+            <input id="media-search" placeholder="Filter by name" /><button class="btn small ghost" id="btn-resync" title="Re-read the bucket">Re-scan bucket</button></div>
+          <div class="media-grid" id="media-grid"></div>
+        </div>
+
+        <!-- Ships & models -->
+        <div class="page hidden" id="p-ships">
+          <h2>Ships &amp; models</h2>
+          <p class="hint">Swap a ship's 3D model for one from the media library. Players load it the next time they open the game. The inspector shows what the game needs: engine markers (<code>engine_*</code>), gun markers (<code>gun_*</code>), size and materials.</p>
+          <div id="ship-models"></div>
+          <details class="card"><summary><b>How to prepare a model in Blender</b></summary>
+            <ol class="howto">
+              <li>Model the ship with its nose pointing along Blender's <b>+Y</b> axis, about 12–15 m long, origin in the middle.</li>
+              <li>Add empties named <code>engine_L</code>, <code>engine_R</code>… at each exhaust (custom property <code>plumeRadius</code> sets the plume size) and <code>gun_0</code>, <code>gun_1</code>… at the cannon muzzles.</li>
+              <li>Bake your materials into one material whose name ends in <b>Baked</b> to keep its look; otherwise name materials <code>…Hull</code>, <code>…Accent</code> (player colour), <code>…Dark</code>, <code>…Canopy</code>, <code>…Glow</code>.</li>
+              <li>Export glTF Binary (.glb) with <b>+Y up</b>, “Custom Properties” on, and no Draco compression. Upload it to the media library.</li>
+            </ol>
+          </details>
+        </div>
+
+        <!-- Feature flags -->
+        <div class="page hidden" id="p-flags">
+          <h2>Feature flags</h2>
+          <p class="hint">Switch missions, ships and events on or off for everyone, instantly — no redeploy. Players see changes within seconds; missions already in flight finish with the rules they started with.</p>
+          <div class="card" id="flags-source"></div>
+          <div id="flags-list"></div>
+        </div>
+
+        <!-- Server health -->
+        <div class="page hidden" id="p-health">
+          <div class="page-head-row"><h2>Server health</h2>
+            <div class="seg" id="health-range"><button data-m="60" class="on">1 h</button><button data-m="360">6 h</button><button data-m="1440">24 h</button></div></div>
+          <div class="health-cards" id="health-cards"></div>
+          <div class="chart-grid" id="charts-app"></div>
+          <h3 class="section-h">Railway platform metrics</h3>
+          <div id="platform"></div>
+          <h3 class="section-h">Community forum</h3>
+          <div class="card" id="forum-health"></div>
+          <h3 class="section-h">Deployment</h3>
+          <div class="card" id="deploy-info"></div>
+        </div>
+
         <!-- Settings -->
         <div class="page hidden" id="p-settings">
           <h2>Settings</h2>
@@ -132,6 +192,10 @@
                 <span class="color-row"><input type="color" data-bind="settings.accent" /><input data-bind="settings.accent" maxlength="7" class="hex" /></span>
               </label>
               <div class="swatches" id="swatches"></div>
+              <div class="fld" style="margin-top:14px"><span>Background image behind the menu (optional)</span>
+                <div class="pick-row"><img id="bg-thumb" class="pick-thumb hidden" alt=""><button type="button" class="btn small" data-pick="settings.background">Choose image…</button><button type="button" class="btn small ghost" data-clear="settings.background">Remove</button></div>
+              </div>
+              <label class="fld"><span>Darken background: <b id="dim-val"></b></span><input type="range" min="0" max="0.9" step="0.05" data-bind="settings.backgroundDim" /></label>
             </div>
             <div class="card">
               <h3>Info tabs</h3>
@@ -173,7 +237,9 @@
       </main>
     </div>
   </section>
+  <div id="modal" class="modal hidden"><div class="modal-card"><div class="modal-head"><b id="modal-title"></b><button class="mini" id="modal-close">Close</button></div><div id="modal-body"></div></div></div>
   <div id="toast"></div>
   <script type="module" src="/js/admin.js"></script>
+  <script type="module" src="/js/admin-ext.js"></script>
 </body>
 </html>

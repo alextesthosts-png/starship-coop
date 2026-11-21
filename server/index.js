@@ -6,6 +6,9 @@ import { WebSocketServer } from 'ws';
 import * as THREE from 'three';
 import { Sim } from './sim.js';
 import * as C from './content.js';
+import * as F from './flags.js';
+import * as M from './media.js';
+import * as MET from './metrics.js';
 import { SHIPS, MISSIONS, DIFFICULTY, MAX_PLAYERS, PLAYER_COLORS } from '../shared/config.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -35,7 +38,9 @@ function makeCode() {
 }
 
 function send(ws, obj) {
-  if (ws.readyState === 1) ws.send(typeof obj === 'string' ? obj : JSON.stringify(obj));
+  if (ws.readyState !== 1) return;
+  const s = typeof obj === 'string' ? obj : JSON.stringify(obj);
+  ws.send(s); MET.trackWsOut(s.length);
 }
 
 class Room {
@@ -114,7 +119,7 @@ class Room {
     send(p.ws, {
       t: 'start', missionId: this.missionId, diff: this.diff, slot: p.slot, reserves: this.sim.reserves,
       players: [...this.players.values()].map((q) => ({ id: q.id, name: q.name, ship: q.ship, color: q.color, slot: q.slot })),
-      objectives: this.sim.objectives, time: this.sim.time, phase: this.sim.phase,
+      objectives: this.sim.objectives, time: this.sim.time, phase: this.sim.phase, scoreMul: this.sim.scoreMul,
     });
   }
   joinMission(p) {
@@ -127,7 +132,9 @@ class Room {
     const sim = this.sim;
     if (!sim) return;
     try {
+      const t0 = performance.now();
       sim.update(TICK);
+      MET.trackTick(performance.now() - t0);
     } catch (err) {
       console.error('sim error', err);
     }
@@ -174,6 +181,13 @@ class Room {
 // ---------------- message handling ----------------
 const clean = (s, n) => String(s || '').replace(/[<>&"]/g, '').trim().slice(0, n);
 
+function allowedShip(ship) {
+  const ok = F.gameFlags().ships;
+  return ok[ship] ? ship : Object.keys(ok).find((k) => ok[k]) || 'lancer';
+}
+function firstMission() { const ok = F.gameFlags().missions; return Object.keys(ok).find((k) => ok[k]) || 'siege'; }
+function broadcastAll(obj) { const s = JSON.stringify(obj); for (const ws of wss.clients) if (ws.readyState === 1) { ws.send(s); MET.trackWsOut(s.length); } }
+
 function maintenanceBlocked(p) {
   const m = C.getContent().settings.maintenance;
   if (m.enabled) { send(p.ws, { t: 'error', msg: m.message || 'Maintenance in progress — new games are paused.' }); return true; }
@@ -187,6 +201,7 @@ function handle(p, msg) {
     case 'hello':
       p.name = clean(msg.name, 16) || `Pilot-${p.id}`;
       if (SHIPS[msg.ship]) p.ship = msg.ship;
+      p.ship = allowedShip(p.ship);
       break;
     case 'create': {
       if (room) room.remove(p);
@@ -217,21 +232,32 @@ function handle(p, msg) {
       send(p.ws, { t: 'left' });
       break;
     case 'ship':
-      if (SHIPS[msg.ship] && (!room || !p.inGame)) { p.ship = msg.ship; room && room.broadcastInfo(); }
+      if (SHIPS[msg.ship] && (!room || !p.inGame)) {
+        if (!F.gameFlags().ships[msg.ship]) { send(p.ws, { t: 'error', msg: `The ${SHIPS[msg.ship].name} is grounded right now.` }); break; }
+        p.ship = msg.ship; room && room.broadcastInfo();
+      }
       break;
     case 'ready':
       if (room && room.state === 'lobby') { p.ready = !!msg.ready; room.broadcastInfo(); }
       break;
     case 'mission':
       if (room && room.hostId === p.id && room.state === 'lobby') {
-        if (MISSIONS.find((m) => m.id === msg.missionId)) room.missionId = msg.missionId;
+        if (MISSIONS.find((m) => m.id === msg.missionId)) {
+          if (F.gameFlags().missions[msg.missionId]) room.missionId = msg.missionId;
+          else send(p.ws, { t: 'error', msg: 'That mission is offline right now.' });
+        }
         if (DIFFICULTY[msg.diff]) room.diff = msg.diff;
         if (typeof msg.isPublic === 'boolean') room.isPublic = msg.isPublic;
         room.broadcastInfo();
       }
       break;
     case 'start':
-      if (room && room.hostId === p.id && room.state === 'lobby') room.start();
+      if (room && room.hostId === p.id && room.state === 'lobby') {
+        const gf = F.gameFlags();
+        if (!gf.missions[room.missionId]) { send(p.ws, { t: 'error', msg: 'That mission is offline right now — pick another one.' }); break; }
+        for (const q of room.players.values()) q.ship = allowedShip(q.ship);
+        room.start();
+      }
       break;
     case 'abort':
       if (room && room.hostId === p.id) room.abort();
@@ -291,10 +317,26 @@ function sessionCookie(req, token, maxAge) {
   return `vw_admin=${token}; Path=/; HttpOnly; SameSite=Strict; Max-Age=${maxAge}${isHttps(req) ? '; Secure' : ''}`;
 }
 
+function envInfo() {
+  const name = process.env.RAILWAY_ENVIRONMENT_NAME || 'local';
+  return { name, preview: !!process.env.RAILWAY_ENVIRONMENT_NAME && name !== 'production', branch: process.env.RAILWAY_GIT_BRANCH || null, commit: (process.env.RAILWAY_GIT_COMMIT_SHA || '').slice(0, 7) || null };
+}
+function readRaw(req, limit) {
+  return new Promise((resolve, reject) => {
+    const declared = +req.headers['content-length'] || 0;
+    if (declared > limit) { reject(Object.assign(new Error(`File too large (max ${Math.round(limit / 1048576)} MB).`), { status: 413 })); req.resume(); return; }
+    let size = 0; const chunks = [];
+    req.on('data', (c) => { size += c.length; if (size > limit) { reject(Object.assign(new Error(`File too large (max ${Math.round(limit / 1048576)} MB).`), { status: 413 })); req.destroy(); } else chunks.push(c); });
+    req.on('end', () => resolve(Buffer.concat(chunks)));
+    req.on('error', reject);
+  });
+}
+
 async function handleApi(req, res, pathname) {
   if (pathname === '/api/content' && req.method === 'GET') {
     const c = C.getContent();
-    return json(res, 200, { site: c.site, announcement: c.announcement, settings: c.settings, sections: c.sections.filter((x) => x.visible), changelog: c.changelog, updatedAt: c.updatedAt });
+    return json(res, 200, { site: c.site, announcement: c.announcement, settings: c.settings, sections: c.sections.filter((x) => x.visible), changelog: c.changelog, updatedAt: c.updatedAt,
+      flags: F.gameFlags(), env: envInfo() });
   }
   if (!pathname.startsWith('/api/admin/')) return json(res, 404, { error: 'not found' });
   const token = cookies(req).vw_admin;
@@ -338,6 +380,44 @@ async function handleApi(req, res, pathname) {
     const t = C.createSession(session.user);
     return json(res, 200, { ok: true }, { 'set-cookie': sessionCookie(req, t, C.SESSION_SECONDS) });
   }
+  // ----- feature flags -----
+  if (route === 'flags' && req.method === 'GET') return json(res, 200, { flags: F.describeAll(), railway: F.railwayStatus() });
+  if (route === 'flags' && req.method === 'POST') {
+    let body; try { body = await readBody(req, 4096); } catch { return json(res, 400, { error: 'bad request' }); }
+    try { F.setOverride(String(body.name), body.value === undefined ? null : body.value); } catch (e) { return json(res, 400, { error: e.message }); }
+    applyFlagChange();
+    return json(res, 200, { flags: F.describeAll(), railway: F.railwayStatus() });
+  }
+  if (route === 'flags/refresh' && req.method === 'POST') { await F.refreshRailway().catch(() => {}); applyFlagChange(); return json(res, 200, { flags: F.describeAll(), railway: F.railwayStatus() }); }
+  // ----- media library -----
+  if (route === 'media' && req.method === 'GET') return json(res, 200, { status: M.status(), items: M.list() });
+  if (route === 'media' && req.method === 'PUT') {
+    if (!M.configured()) return json(res, 503, { error: 'The media bucket is not connected to this environment.' });
+    try {
+      const buf = await readRaw(req, Math.max(M.LIMITS.image, M.LIMITS.model));
+      const name = decodeURIComponent(String(req.headers['x-file-name'] || 'upload'));
+      return json(res, 200, await M.upload(buf, name, session.user));
+    } catch (e) { return json(res, e.status || 500, { error: e.message }); }
+  }
+  if (route === 'media' && req.method === 'DELETE') {
+    const key = new URL(req.url, 'http://x').searchParams.get('key') || '';
+    if (!M.find(key)) return json(res, 404, { error: 'Not found' });
+    try { await M.remove(key); return json(res, 200, { ok: true }); } catch (e) { return json(res, 502, { error: e.message }); }
+  }
+  if (route === 'media/resync' && req.method === 'POST') {
+    try { const n = await M.resync(); return json(res, 200, { ok: true, count: n, items: M.list() }); } catch (e) { return json(res, 502, { error: e.message }); }
+  }
+  // ----- server health -----
+  if (route === 'health' && req.method === 'GET') {
+    const q = new URL(req.url, 'http://x').searchParams;
+    const minutes = Math.min(1440, Math.max(15, +q.get('minutes') || 60));
+    const hours = Math.max(1, Math.round(minutes / 60));
+    const [game, forum] = await Promise.all([
+      MET.platformMetrics(process.env.RAILWAY_SERVICE_ID, hours),
+      MET.platformMetrics(process.env.FORUM_SERVICE_ID, hours),
+    ]);
+    return json(res, 200, { app: MET.snapshot(minutes), platform: { configured: MET.platformConfigured(), game, forum }, forum: MET.forumStatus(), media: M.status(), env: envInfo(), flags: F.railwayStatus() });
+  }
   if (route === 'stats' && req.method === 'GET') {
     return json(res, 200, { rooms: rooms.size, players: [...rooms.values()].reduce((n, r) => n + r.players.size, 0), playing: [...rooms.values()].filter((r) => r.state === 'playing').length, dataDir: C.DATA_DIR });
   }
@@ -345,10 +425,15 @@ async function handleApi(req, res, pathname) {
 }
 
 const server = http.createServer((req, res) => {
+  MET.trackHttp(req, res);
   const url = new URL(req.url, 'http://x');
   let pathname;
   try { pathname = decodeURIComponent(url.pathname); } catch { res.writeHead(400); return res.end(); }
   if (pathname === '/health') { res.writeHead(200, { 'content-type': 'text/plain' }); return res.end('ok'); }
+  if (pathname.startsWith('/media/') && (req.method === 'GET' || req.method === 'HEAD')) {
+    return M.serve(req, res, pathname.slice(7)).catch((e) => { console.error('media', e); if (!res.headersSent) { res.writeHead(500); res.end(); } });
+  }
+  if (pathname === '/api/flags') return json(res, 200, F.gameFlags());
   if (pathname.startsWith('/api/') && pathname !== '/api/rooms') {
     return handleApi(req, res, pathname).catch((e) => { console.error('api error', e); json(res, 500, { error: 'server error' }); });
   }
@@ -390,8 +475,9 @@ wss.on('connection', (ws) => {
   const p = { id: nextPlayerId++, ws, name: 'Pilot', ship: 'lancer', room: null, alive: false, inGame: false, state: null };
   ws.isAlive = true;
   ws.on('pong', () => { ws.isAlive = true; });
-  send(ws, { t: 'welcome', id: p.id });
+  send(ws, { t: 'welcome', id: p.id, flags: F.gameFlags() });
   ws.on('message', (data) => {
+    MET.trackWsIn();
     let msg;
     try { msg = JSON.parse(data); } catch { return; }
     if (!msg || typeof msg.t !== 'string') return;
@@ -408,4 +494,24 @@ setInterval(() => {
   }
 }, 15000);
 
-server.listen(PORT, () => console.log(`Vanguard Wing server listening on :${PORT}`));
+// ---------------- flags: live updates to every player + lobby fix-ups ----------------
+function applyFlagChange(flags = F.gameFlags()) {
+  broadcastAll({ t: 'flags', flags });
+  for (const room of rooms.values()) {
+    if (room.state !== 'lobby') continue;   // missions in flight finish with the rules they started with
+    let changed = false;
+    if (!flags.missions[room.missionId]) { room.missionId = firstMission(); changed = true; }
+    for (const q of room.players.values()) { const s2 = allowedShip(q.ship); if (s2 !== q.ship) { q.ship = s2; changed = true; } }
+    if (changed) room.broadcastInfo();
+  }
+}
+F.watchFlags(applyFlagChange);
+F.initRailwayFlags().then(() => applyFlagChange());
+MET.setGauges(() => ({
+  players: wss.clients.size, rooms: rooms.size,
+  playing: [...rooms.values()].filter((r) => r.state === 'playing').length,
+  pilotsInFlight: [...rooms.values()].reduce((n, r) => n + (r.state === 'playing' ? r.players.size : 0), 0),
+}));
+MET.probeForum(process.env.FORUM_URL);
+
+server.listen(PORT, () => console.log(`Vanguard Wing server listening on :${PORT}${process.env.RAILWAY_ENVIRONMENT_NAME ? ` (${process.env.RAILWAY_ENVIRONMENT_NAME})` : ''}`));

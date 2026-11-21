@@ -3,6 +3,7 @@
 // the server owns everything else.
 import * as THREE from 'three';
 import { SHIPS, WEAPONS, ENEMIES, MISSIONS, DIFFICULTY } from '../shared/config.js';
+import { gameFlags } from './flags.js';
 import { terrainHeight, asteroids, DREAD, TOWERS, CONVOY, PLANET, insideBox, spawnPoint } from '../shared/world.js';
 
 const UP = new THREE.Vector3(0, 1, 0);
@@ -48,14 +49,16 @@ export class Sim {
     this.objectives = [];
     this.stats = new Map(); // pid -> stats
     this.humans = Math.max(1, room.players.size);
-    this.reserves = this.diff.reserves + (this.humans - 1) * 2;
+    this.flags = gameFlags();
+    this.scoreMul = this.flags.doubleScore ? 2 : 1;
+    this.reserves = this.diff.reserves + (this.humans - 1) * 2 + (this.flags.extraReserves ? 2 : 0);
     this.respawns = []; // {pid, at}
     this.counters = { fighterKills: 0 };
     this.asteroids = this.env === 'space' && this.def.id === 'convoy' ? asteroids() : [];
     for (const p of room.players.values()) this.ensureStats(p.id);
     this.script = SCRIPTS[this.def.id](this);
     this.script.init();
-    this.spawnWings();
+    if (this.flags.aiWingmates) this.spawnWings();
   }
 
   // ---------- helpers ----------
@@ -248,7 +251,7 @@ export class Sim {
     if (ownerPid != null && e.team === 'enemy') {
       const st = this.ensureStats(ownerPid);
       st.kills++;
-      st.score += def.score;
+      st.score += def.score * this.scoreMul;
     }
     if (e.team === 'enemy' && (e.type === 'raider' || e.type === 'bomber')) this.counters.fighterKills++;
     if (e.type === 'wing') this.msg(e.data.name || 'Wingmate', 'I\'m hit! Ejecting!');

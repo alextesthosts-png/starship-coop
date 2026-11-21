@@ -239,3 +239,17 @@ kbd { display: inline-block; padding: 1px 8px; border: 1px solid var(--line); bo
 .forum-link { display: inline-flex; align-items: center; gap: 6px; margin-top: 12px; padding: 7px 16px; border-radius: 999px; border: 1px solid var(--line); background: rgba(10,24,40,0.85); color: #e6f3fb; font-size: 16px; font-weight: 700; text-decoration: none; transition: all .15s; }
 .forum-link:hover { border-color: var(--cyan); color: #fff; box-shadow: 0 0 16px rgba(111,214,255,0.25); }
 .tab.ext { margin-left: auto; text-decoration: none; color: var(--cyan); }
+
+/* ---------- flags, media, preview ---------- */
+.ship-card.off { opacity: 0.45; cursor: not-allowed; filter: grayscale(0.7); }
+.mission.off { opacity: 0.5; }
+.grounded { font-family: 'Rajdhani', sans-serif; font-size: 11px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; padding: 1px 6px; border-radius: 4px; background: rgba(255,106,90,0.18); color: #ffb0a6; vertical-align: middle; }
+.event-strip { display: flex; gap: 8px; justify-content: center; flex-wrap: wrap; margin-top: 10px; }
+.event-strip span { padding: 5px 12px; border-radius: 999px; background: rgba(255,211,106,0.14); border: 1px solid rgba(255,211,106,0.5); color: #ffe7a8; font-weight: 700; font-size: 15px; animation: evpulse 2.4s ease-in-out infinite; }
+@keyframes evpulse { 50% { box-shadow: 0 0 16px rgba(255,211,106,0.35); } }
+#page-bg { position: fixed; inset: 0; z-index: 9; background-size: cover; background-position: center; pointer-events: none; }
+#page-bg::after { content: ''; position: absolute; inset: 0; background: rgba(2,6,14,var(--dim, 0.55)); }
+body:has(#menu.hidden) #page-bg { display: none; }
+#preview-ribbon { position: fixed; top: 14px; left: -46px; z-index: 50; transform: rotate(-35deg); background: #ffb347; color: #1a1200; font: 900 12px 'Orbitron', 'Rajdhani', sans-serif; letter-spacing: 0.12em; padding: 6px 60px; box-shadow: 0 4px 16px rgba(0,0,0,0.4); pointer-events: none; }
+.announce-img { display: block; width: 100%; max-height: 220px; object-fit: cover; border-radius: 8px; margin: 0 0 10px; }
+.md-img { max-width: 100%; border-radius: 8px; display: block; margin: 6px 0; }

@@ -10,6 +10,10 @@ import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 //   *Canopy -> glass, *Glow -> engine glow, *Baked -> kept exactly as authored (own textures,
 //   no player colour). Empties named engine_* get an engine flare.
 const SHIP_FILES = { lancer: '/models/lancer.glb', warden: '/models/warden.glb' };
+// Models uploaded in the admin media library can replace the built-in ones.
+export function setShipModels(overrides = {}) {
+  for (const [k, url] of Object.entries(overrides)) if (typeof url === 'string' && /^\/media\/models\/[\w.-]+$/.test(url)) SHIP_FILES[k] = url;
+}
 const PLUME_RADIUS = { lancer: 0.62, warden: 0.9, hammer: 0.8 };
 // how strongly each ship's baked material reflects the studio environment
 const ENV_INTENSITY = { lancer: 1.0, warden: 0.28 };
