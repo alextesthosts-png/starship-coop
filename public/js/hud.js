@@ -122,6 +122,7 @@ export class Hud {
     const tsec = Math.max(0, Math.floor(g.missionTime));
     $('hud-time').textContent = `${Math.floor(tsec / 60)}:${String(tsec % 60).padStart(2, '0')}`;
     $('hud-score').textContent = me.score;
+    $('hud-kills').textContent = me.kills || 0;
     $('hud-res').textContent = g.reserves;
 
     if (!me.alive) { this.drawRadar(g); return; }

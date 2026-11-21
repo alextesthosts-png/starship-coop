@@ -231,6 +231,7 @@ export class Game {
         if (ev.by === this.myId && ev.team === 'enemy') {
           const pts = ENEMIES[ev.type].score * (this.scoreMul || 1);
           this.me.score += pts;
+          this.me.kills = (this.me.kills || 0) + 1;
           this.hud.popup(`+${pts}`);
           this.hud.killFeed(`You destroyed a ${label} <b>+${pts}</b>`, '#9fe8ff');
         } else if (ev.team === 'enemy' && ev.by != null) {
