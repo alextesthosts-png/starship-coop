@@ -770,17 +770,16 @@ export class Game {
     for (const r of this.remotes.values()) {
       if (!r.alive) { r.mesh.visible = false; continue; }
       r.mesh.visible = this.interp(r, renderT);
-      for (const eg of r.mesh.userData.engines) eg.scale.setScalar(eg.userData.baseSize * (r.boost ? 1.8 : 1) * (0.9 + Math.random() * 0.2));
+      const rex = r.mesh.userData.exhausts;
+      if (rex) for (const ex of rex) ex.userData.setThrust(r.boost ? 1 : 0.2, dt, this.time);
+      for (const eg of r.mesh.userData.engines) eg.scale.setScalar(eg.userData.baseSize * (rex ? 1 : (r.boost ? 1.8 : 1)) * (0.9 + Math.random() * 0.2));
     }
     // my engines
-    for (const eg of this.model.userData.engines) eg.scale.setScalar(eg.userData.baseSize * (0.35 + this.me.speed / this.def.speed * 0.3 + (this.me.boosting ? 0.45 : 0)) * (0.92 + Math.random() * 0.16));
+    const exh = this.model.userData.exhausts;
+    const thrust = this.me.alive ? (this.me.boosting ? 1 : Math.max(0, (this.me.speed - this.def.minSpeed) / (this.def.speed - this.def.minSpeed)) * 0.25) : 0;
+    if (exh) for (const ex of exh) ex.userData.setThrust(thrust, dt, this.time);
+    for (const eg of this.model.userData.engines) eg.scale.setScalar(eg.userData.baseSize * (exh ? 1 : (0.35 + this.me.speed / this.def.speed * 0.3 + (this.me.boosting ? 0.45 : 0))) * (0.92 + Math.random() * 0.16));
     if (this.me.alive) {
-      if (this.me.boosting) {
-        for (const eg of this.model.userData.engines) {
-          eg.getWorldPosition(_v);
-          this.particles.emit(_v.x, _v.y, _v.z, 0, 0, 0, 0.35, 2.5, 0.6, 1, 2, 0, 0);
-        }
-      }
       if (this.me.hull / this.me.maxHull < 0.4 && Math.random() < 0.5) {
         const p = this.ship.position;
         this.particles.emit(p.x, p.y, p.z, (Math.random() - 0.5) * 5, 4, (Math.random() - 0.5) * 5, 1.4, 3, 0.15, 0.13, 0.12, 6, 0.5);
