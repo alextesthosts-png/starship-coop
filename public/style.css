@@ -235,3 +235,7 @@ kbd { display: inline-block; padding: 1px 8px; border: 1px solid var(--line); bo
 .btn:disabled.big, .launch-card.maint .btn { opacity: 0.5; cursor: not-allowed; }
 .logo-top #c-title { color: #fff; }
 .btn.primary { background: linear-gradient(180deg, var(--cyan), var(--cyan-d)); border-color: var(--cyan); text-shadow: 0 1px 2px rgba(0,0,0,0.45); }
+
+.forum-link { display: inline-flex; align-items: center; gap: 6px; margin-top: 12px; padding: 7px 16px; border-radius: 999px; border: 1px solid var(--line); background: rgba(10,24,40,0.85); color: #e6f3fb; font-size: 16px; font-weight: 700; text-decoration: none; transition: all .15s; }
+.forum-link:hover { border-color: var(--cyan); color: #fff; box-shadow: 0 0 16px rgba(111,214,255,0.25); }
+.tab.ext { margin-left: auto; text-decoration: none; color: var(--cyan); }

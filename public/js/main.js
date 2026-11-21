@@ -163,7 +163,7 @@ function openTab(id) {
   document.querySelectorAll('.info-card .tab-body').forEach((b) => b.classList.toggle('hidden', b.id !== id));
   if (id === 'tab-rooms') refreshRooms();
 }
-document.querySelector('.tabs').addEventListener('click', (e) => { const t = e.target.closest('.tab'); if (t) openTab(t.dataset.tab); });
+document.querySelector('.tabs').addEventListener('click', (e) => { const t = e.target.closest('.tab'); if (t && t.dataset.tab) openTab(t.dataset.tab); });
 
 // ---------------- editable site content (from the admin panel) ----------------
 S.maintenance = null;
@@ -181,6 +181,9 @@ function applyContent(c) {
   setText('c-step1', s.step1); setText('c-step2', s.step2); setText('c-step3', s.step3);
   setText('c-quick', s.quickLabel); setText('c-quicksub', s.quickSub); setText('c-create', s.createLabel); setText('c-createsub', s.createSub); setText('c-join', s.joinLabel);
   if (s.namePlaceholder) $('name').placeholder = s.namePlaceholder;
+  const fl = $('forum-link'), ft = $('forum-tab');
+  if (s.forumUrl) { fl.href = s.forumUrl; ft.href = s.forumUrl; setText('c-forum', s.forumLabel || 'Community Forum'); }
+  fl.classList.toggle('hidden', !s.forumUrl); ft.classList.toggle('hidden', !s.forumUrl);
   const st = c.settings || {};
   if (st.accent) {
     document.documentElement.style.setProperty('--cyan', st.accent);
@@ -219,7 +222,7 @@ function applyContent(c) {
         <ul>${r.items.map((t) => `<li>${inlineMarkup(t)}</li>`).join('')}</ul>
       </article>`).join('') : '<p class="muted">No releases yet.</p>';
   }
-  const visibleTabs = [...tabs.querySelectorAll('.tab:not(.hidden)')];
+  const visibleTabs = [...tabs.querySelectorAll('.tab:not(.hidden):not(.ext)')];
   const want = visibleTabs.find((t) => t.dataset.key === st.defaultTab) || visibleTabs[0];
   document.querySelector('.info-card').classList.toggle('hidden', !visibleTabs.length);
   if (want) openTab(want.dataset.tab);

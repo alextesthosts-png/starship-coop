@@ -24,6 +24,8 @@ export const DEFAULT_CONTENT = {
     quickLabel: 'Quick Play', quickSub: 'join any open wing',
     createLabel: 'Create a Wing', createSub: 'invite friends with a code',
     joinLabel: 'Join with code',
+    forumUrl: process.env.FORUM_URL || 'https://vanguard-forum-production.up.railway.app',
+    forumLabel: 'Community Forum',
   },
   announcement: { enabled: false, text: '', style: 'info' },
   settings: {
@@ -34,7 +36,13 @@ export const DEFAULT_CONTENT = {
   },
   sections: [],
   changelog: [
-    { id: 'v1-5', version: 'v1.5', date: '21 Nov 2026', title: '', latest: true, items: [
+    { id: 'v1-6', version: 'v1.6', date: '21 Nov 2026', title: '', latest: true, items: [
+      '**Community forum** is open: create an account with your callsign and favourite ship, find wingmates, share tactics, report bugs and suggest features.',
+      'Categories for announcements, looking-for-wingmates, tactics, ships, bug reports and suggestions; search, quotes and profiles.',
+      'Wing Leaders (moderators) and Command (admins) can pin, lock, move and delete threads, ban accounts and manage categories.',
+      '**Community Forum** button on the main page; its link and label can be changed in the admin panel.',
+    ] },
+    { id: 'v1-5', version: 'v1.5', date: '21 Nov 2026', title: '', latest: false, items: [
       '**Admin panel** at `/admin`: sign in to edit the landing page texts, post an announcement banner, add custom info tabs and write the changelog. No code changes needed.',
       '**Site settings:** accent colour, which info tabs are shown and which opens first, browser title and search description.',
       '**Maintenance mode** pauses new games with a message to players while you update; missions in flight finish normally.',
@@ -83,8 +91,9 @@ export function normalize(input) {
   const d = DEFAULT_CONTENT;
   const s = input?.site || {};
   const site = {};
-  const limits = { pageTitle: 80, metaDescription: 200, title: 30, titleAccent: 30, tagline: 160, step1: 60, step2: 60, step3: 60, namePlaceholder: 30, quickLabel: 30, quickSub: 60, createLabel: 30, createSub: 60, joinLabel: 30 };
+  const limits = { forumUrl: 200, forumLabel: 40, pageTitle: 80, metaDescription: 200, title: 30, titleAccent: 30, tagline: 160, step1: 60, step2: 60, step3: 60, namePlaceholder: 30, quickLabel: 30, quickSub: 60, createLabel: 30, createSub: 60, joinLabel: 30 };
   for (const [k, max] of Object.entries(limits)) site[k] = str(s[k], max, d.site[k]);
+  if (site.forumUrl && !/^https?:\/\//.test(site.forumUrl)) site.forumUrl = '';   // only real web links
   const a = input?.announcement || {};
   const announcement = { enabled: bool(a.enabled), text: str(a.text, 500), style: ['info', 'success', 'warning'].includes(a.style) ? a.style : 'info' };
   const st = input?.settings || {};
@@ -102,7 +111,8 @@ export function normalize(input) {
     id: slug(r?.id, i), version: str(r?.version, 24, 'v?'), date: str(r?.date, 40), title: str(r?.title, 100), latest: bool(r?.latest),
     items: (Array.isArray(r?.items) ? r.items : []).map((t) => str(t, 800).trim()).filter(Boolean).slice(0, 60),
   }));
-  return { site, announcement, settings, sections, changelog, updatedAt: input?.updatedAt || null, updatedBy: input?.updatedBy || null };
+  const knownReleases = (Array.isArray(input?.knownReleases) ? input.knownReleases : []).filter((x) => typeof x === 'string').slice(0, 500);
+  return { site, announcement, settings, sections, changelog, knownReleases, updatedAt: input?.updatedAt || null, updatedBy: input?.updatedBy || null };
 }
 
 // ---------------- load / save ----------------
@@ -114,8 +124,22 @@ function writeAtomic(file, data) {
 }
 export function getContent() {
   if (content) return content;
-  try { content = normalize(JSON.parse(fs.readFileSync(CONTENT_FILE, 'utf8'))); }
-  catch { content = normalize(DEFAULT_CONTENT); }
+  let stored = null;
+  try { stored = JSON.parse(fs.readFileSync(CONTENT_FILE, 'utf8')); } catch {}
+  content = normalize(stored || DEFAULT_CONTENT);
+  // merge built-in release notes the admin hasn't seen yet (deleted ones stay deleted)
+  const builtIn = DEFAULT_CONTENT.changelog.map((r) => r.id);
+  if (!stored) content.knownReleases = builtIn;
+  else {
+    const known = new Set(content.knownReleases.length ? content.knownReleases : content.changelog.map((r) => r.id));
+    const fresh = DEFAULT_CONTENT.changelog.filter((r) => !known.has(r.id) && !content.changelog.some((c) => c.id === r.id));
+    if (fresh.length) {
+      if (fresh.some((r) => r.latest)) content.changelog.forEach((r) => { r.latest = false; });
+      content.changelog.unshift(...fresh.map((r) => ({ ...r, items: [...r.items] })));
+    }
+    content.knownReleases = [...new Set([...known, ...builtIn])];
+    if (fresh.length) { try { writeAtomic(CONTENT_FILE, JSON.stringify(content, null, 1)); } catch (e) { console.error(e); } }
+  }
   return content;
 }
 export function saveContent(input, by) {
@@ -124,6 +148,7 @@ export function saveContent(input, by) {
   const revId = new Date().toISOString().replace(/[:.]/g, '-');
   try { writeAtomic(path.join(REV_DIR, `${revId}.json`), JSON.stringify(prev)); } catch (e) { console.error('revision write failed', e); }
   const next = normalize(input);
+  next.knownReleases = [...new Set([...(prev.knownReleases || []), ...DEFAULT_CONTENT.changelog.map((r) => r.id)])];
   next.updatedAt = new Date().toISOString();
   next.updatedBy = by;
   writeAtomic(CONTENT_FILE, JSON.stringify(next, null, 1));
