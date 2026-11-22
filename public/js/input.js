@@ -11,17 +11,40 @@ export class Input {
     try { Object.assign(this.settings, JSON.parse(localStorage.getItem('vw_input') || '{}')); } catch {}
     this.enabled = false;
     this.pad = null;
+    // Free camera (left Alt): tap to toggle, or hold and let go to return to the chase view.
+    this.freeCam = false;      // set by the game while the free camera is active
+    this.freeToggle = false;
+    this.altHeld = false;
+    this.altT = 0;
+    this.altOther = false;     // another key was pressed while Alt was down
+    this.look = { x: 0, y: 0 };
+    this.wheel = 0;
 
     this._kd = (e) => {
       if (!this.enabled) return;
       if (document.activeElement && document.activeElement.tagName === 'INPUT') return;
-      if (['Space', 'Tab', 'ArrowUp', 'ArrowDown'].includes(e.code)) e.preventDefault();
+      if (['Space', 'Tab', 'ArrowUp', 'ArrowDown', 'AltLeft'].includes(e.code)) e.preventDefault();
+      if (e.code === 'AltLeft') {
+        if (!this.altHeld) { this.altHeld = true; this.altT = e.timeStamp; this.altOther = false; }
+      } else if (this.altHeld) { this.altOther = true; e.preventDefault(); }   // keep Alt+D / Alt+F etc. away from the browser
       if (!this.keys.has(e.code)) this.pressed.add(e.code);
       this.keys.add(e.code);
     };
-    this._ku = (e) => this.keys.delete(e.code);
+    this._ku = (e) => {
+      this.keys.delete(e.code);
+      if (e.code === 'AltLeft') {
+        e.preventDefault();   // stops the browser menu bar from taking focus
+        if (this.altHeld && this.enabled && !this.altOther && e.timeStamp - this.altT < 280) this.freeToggle = !this.freeToggle;
+        this.altHeld = false;
+      }
+    };
     this._mm = (e) => {
       if (!this.locked) return;
+      if (this.freeCam) {   // mouse looks around instead of steering the ship
+        this.look.x += e.movementX * 0.0022 * this.settings.sens;
+        this.look.y += e.movementY * 0.0022 * this.settings.sens * (this.settings.invert ? -1 : 1);
+        return;
+      }
       const k = 0.0028 * this.settings.sens;
       this.stick.x += e.movementX * k;
       this.stick.y += e.movementY * k * (this.settings.invert ? -1 : 1);
@@ -35,6 +58,7 @@ export class Input {
       if (!this.locked) { this.mouseDown = [false, false, false]; this.onUnlock && this.onUnlock(); }
     };
     this._ctx = (e) => e.preventDefault();
+    this._wh = (e) => { if (this.freeCam && this.locked) { this.wheel += Math.sign(e.deltaY); e.preventDefault(); } };
     window.addEventListener('keydown', this._kd);
     window.addEventListener('keyup', this._ku);
     window.addEventListener('mousemove', this._mm);
@@ -42,7 +66,8 @@ export class Input {
     window.addEventListener('mouseup', this._mu);
     document.addEventListener('pointerlockchange', this._plc);
     canvas.addEventListener('contextmenu', this._ctx);
-    window.addEventListener('blur', () => { this.keys.clear(); this.mouseDown = [false, false, false]; });
+    window.addEventListener('wheel', this._wh, { passive: false });
+    window.addEventListener('blur', () => { this.keys.clear(); this.mouseDown = [false, false, false]; this.altHeld = false; });
   }
   saveSettings() { try { localStorage.setItem('vw_input', JSON.stringify(this.settings)); } catch {} }
   lock() {
@@ -55,6 +80,10 @@ export class Input {
   wasPressed(code) { return this.pressed.has(code); }
   endFrame() { this.pressed.clear(); }
   key(c) { return this.keys.has(c); }
+  // Free camera wanted: toggled on with a tap of left Alt, or while left Alt is held down.
+  freeCamWanted() { return this.enabled && (this.freeToggle || this.altHeld); }
+  resetFreeCam() { this.freeToggle = false; this.altHeld = false; }
+  takeLook() { const l = { x: this.look.x, y: this.look.y, wheel: this.wheel }; this.look.x = this.look.y = 0; this.wheel = 0; return l; }
 
   // Returns normalized control state
   poll(dt) {
@@ -118,5 +147,6 @@ export class Input {
     window.removeEventListener('mousedown', this._md);
     window.removeEventListener('mouseup', this._mu);
     document.removeEventListener('pointerlockchange', this._plc);
+    window.removeEventListener('wheel', this._wh);
   }
 }

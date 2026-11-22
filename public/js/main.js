@@ -1,7 +1,7 @@
 // App shell: networking, menus, lobby, debrief, and the menu backdrop scene.
 import * as THREE from 'three';
 import { SHIPS, MISSIONS, DIFFICULTY } from '/shared/config.js';
-import { buildShip, preloadShipModels, setBakedEnvironment, setShipModels, setModelMarkers, setLiveries } from './models.js';
+import { buildShip, applyModelGlow, preloadShipModels, setBakedEnvironment, setShipModels, setModelMarkers, setLiveries } from './models.js';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import { render as renderMarkup, inline as inlineMarkup, escapeHtml } from '/shared/markup.js';
 import { Sfx } from './audio.js';
@@ -210,6 +210,7 @@ function applyGameTuning(c, live = false) {
   renderShipSelect($('ship-select'));
   renderShipSelect($('ship-select-lobby'));
   if (S.room) renderLobby();
+  applyModelGlow();
   if (S.game?.applyLooks) S.game.applyLooks();
   if (live) toast(S.preview ? 'Preview draft updated.' : 'Command updated the fleet.');
 }

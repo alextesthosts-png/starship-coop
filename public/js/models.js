@@ -97,11 +97,65 @@ const sceneByUrl = new Map();   // url -> Promise<scene|null>
 const gltfLoader = new GLTFLoader();
 export function preloadShipModels() {
   const jobs = Object.entries(SHIP_FILES).map(([k, url]) => {
-    if (!sceneByUrl.has(url)) sceneByUrl.set(url, gltfLoader.loadAsync(url).then((g) => g.scene).catch((e) => { console.warn('model failed', url, e); return null; }));
+    if (!sceneByUrl.has(url)) sceneByUrl.set(url, gltfLoader.loadAsync(url).then((g) => { tameEmissive(g.scene, url); return g.scene; }).catch((e) => { console.warn('model failed', url, e); return null; }));
     return sceneByUrl.get(url).then((sc) => { if (sc) shipModels[k] = sc; else delete shipModels[k]; });
   });
   for (const k of Object.keys(shipModels)) if (!SHIP_FILES[k]) delete shipModels[k];
   return Promise.all(jobs);
+}
+// ---- self-lit materials in uploaded models ----
+// Models converted from other formats often come with the hull's own colour texture copied into
+// the emissive slot (plus a strong emissive strength), so the whole ship lights itself and blooms
+// to white. Spot those (emissive texture = colour texture, with real surface detail) and switch
+// them off. Flat-colour textures are running lights and keep their glow, scaled by the
+// "Uploaded model self-glow" setting so they can't wash out the screen.
+const thumbCanvas = typeof document !== 'undefined' ? document.createElement('canvas') : null;
+function thumb(tex) {
+  const img = tex && tex.image;
+  if (!img || !thumbCanvas || !(img.width > 0)) return null;
+  thumbCanvas.width = thumbCanvas.height = 24;
+  const ctx = thumbCanvas.getContext('2d', { willReadFrequently: true });
+  try { ctx.clearRect(0, 0, 24, 24); ctx.drawImage(img, 0, 0, 24, 24); return ctx.getImageData(0, 0, 24, 24).data; } catch { return null; }
+}
+function hullTextureAsGlow(m) {
+  const sameImage = m.emissiveMap === m.map || m.emissiveMap.image === m.map.image;
+  const a = thumb(m.emissiveMap);
+  if (!a) return false;
+  const b = sameImage ? a : thumb(m.map);
+  if (!b) return false;
+  let diff = 0, s = 0, s2 = 0;
+  const n = a.length / 4;
+  for (let i = 0; i < a.length; i += 4) {
+    diff += (Math.abs(a[i] - b[i]) + Math.abs(a[i + 1] - b[i + 1]) + Math.abs(a[i + 2] - b[i + 2])) / 765;
+    const l = (a[i] + a[i + 1] + a[i + 2]) / 765; s += l; s2 += l * l;
+  }
+  const mean = s / n, std = Math.sqrt(Math.max(0, s2 / n - mean * mean));
+  return diff / n < 0.04 && std > 0.02 && mean < 0.7;
+}
+const uploadedMats = new Set();   // materials of uploaded models: glow and reflections follow VISUALS
+function tameEmissive(scene, url) {
+  const uploaded = url.startsWith('/media/');
+  const seen = new Set();
+  scene.traverse((o) => {
+    if (!o.isMesh) return;
+    for (const m of Array.isArray(o.material) ? o.material : [o.material]) {
+      if (!m || seen.has(m) || !m.emissive) continue;
+      seen.add(m);
+      if (m.emissiveMap && m.map && hullTextureAsGlow(m)) { m.emissive.setRGB(0, 0, 0); m.emissiveMap = null; m.needsUpdate = true; }
+      if (!uploaded) continue;
+      // converted models are often mirror-glossy; in the game's studio reflections that reads as a white sheen
+      if (!m.roughnessMap) m.roughness = Math.max(m.roughness, 0.45);
+      m.userData.ei0 = m.emissiveIntensity;
+      uploadedMats.add(m);
+    }
+  });
+  applyModelGlow();
+}
+export function applyModelGlow() {
+  for (const m of uploadedMats) {
+    m.emissiveIntensity = m.userData.ei0 * (VISUALS.modelGlow ?? 0.35);
+    m.envMapIntensity = VISUALS.modelReflect ?? 0.35;
+  }
 }
 const shipModelFor = (type) => (SHIP_FILES[type] && sceneByUrl.has(SHIP_FILES[type]) ? shipModels[type] : null);
 function buildShipFromModel(type, color, { enemy = false, plumes = true, fallbackEngine = true, livery = null } = {}) {
@@ -152,7 +206,7 @@ function buildShipFromModel(type, color, { enemy = false, plumes = true, fallbac
         // uploaded enemy/structure models keep their own materials unless they use the naming scheme
         if (enemy && !/(Hull|Accent|Dark|Canopy|Glow)$/.test(n)) return m;
         if (n.endsWith('Baked')) {
-          if (bakedEnv && !m.envMap) { m.envMap = bakedEnv; m.envMapIntensity = ENV_INTENSITY[type] ?? ENV_INTENSITY[BASE_OF[type]] ?? 0.5; m.needsUpdate = true; }
+          if (bakedEnv && !m.envMap) { m.envMap = bakedEnv; m.envMapIntensity = uploadedMats.has(m) ? (VISUALS.modelReflect ?? 0.35) : ENV_INTENSITY[type] ?? ENV_INTENSITY[BASE_OF[type]] ?? 0.5; m.needsUpdate = true; }
           return m;
         }
         return n.endsWith('Accent') ? accent : n.endsWith('Dark') ? darkM : n.endsWith('Canopy') ? canopy : n.endsWith('Glow') ? glowM : hullM;

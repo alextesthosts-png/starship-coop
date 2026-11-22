@@ -11,7 +11,7 @@ const BASE = { SHIPS: clone(SHIPS), WEAPONS: clone(WEAPONS), ENEMIES: clone(ENEM
 export const VISUALS_DEFAULT = {
   bloomStrength: 0.85, bloomThreshold: 0.82, exposure: 1.0,
   fov: 70, boostFov: 12, shake: 1,
-  plumeLength: 1, plume: { lancer: '', warden: '', hammer: '' },
+  plumeLength: 1, modelGlow: 0.35, modelReflect: 0.35, plume: { lancer: '', warden: '', hammer: '' },
   enemyLaser: '#ff2a1c', heavyLaser: '#ff661a', wingLaser: '#33ff66', missile: '#ffaa55', bomb: '#66aaff',
   planet: { skyTop: '#2b4a7a', skyHorizon: '#e8a070', fog: '#d8a080', fogFar: 7500, sun: '#ffe2b8', sunIntensity: 2.4 },
   space: { convoyA: '#3a60c0', convoyB: '#40a0a0', dreadA: '#b03a60', dreadB: '#5a30a0', sun: '#fff0e0', sunIntensity: 2.6 },
@@ -94,6 +94,8 @@ export const TUNING_GROUPS = [
     'look.boostFov': num('Extra field of view when boosting', 0, 30, 1, () => VISUALS_DEFAULT.boostFov, (v) => { VISUALS.boostFov = v; }, '°'),
     'look.shake': num('Camera shake ×', 0, 3, 0.1, () => VISUALS_DEFAULT.shake, (v) => { VISUALS.shake = v; }, '×'),
     'look.plumeLength': num('Engine plume length ×', 0.3, 2, 0.05, () => VISUALS_DEFAULT.plumeLength, (v) => { VISUALS.plumeLength = v; }, '×'),
+    'look.modelGlow': num('Uploaded model self-glow ×', 0, 2, 0.05, () => VISUALS_DEFAULT.modelGlow, (v) => { VISUALS.modelGlow = v; }, '×'),
+    'look.modelReflect': num('Uploaded model reflections', 0, 1.5, 0.05, () => VISUALS_DEFAULT.modelReflect, (v) => { VISUALS.modelReflect = v; }),
   } },
   { id: 'look-planet', section: 'Looks', title: 'Planet sky (Outpost Siege)', hint: 'Applies from the next mission launch.', fields: {
     'look.planet.skyTop': color('Sky (overhead)', () => VISUALS_DEFAULT.planet.skyTop, (v) => { VISUALS.planet.skyTop = v; }),

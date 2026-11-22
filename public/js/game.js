@@ -7,7 +7,7 @@ import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 import { SHIPS, WEAPONS, ENEMIES, MISSIONS, DIFFICULTY } from '/shared/config.js';
 import { VISUALS } from '/shared/tuning.js';
 import { DREAD, insideBox, spawnPoint, terrainHeight } from '/shared/world.js';
-import { buildShip, buildEntity, engineGlow } from './models.js';
+import { buildShip, buildEntity, engineGlow, applyModelGlow } from './models.js';
 import { buildPlanetEnv, buildSpaceEnv } from './env.js';
 import { Particles, Bolts } from './effects.js';
 
@@ -62,6 +62,9 @@ export class Game {
     this.sendT = 0;
     this.shake = 0;
     this.camMode = 0;
+    this.freeCam = false;
+    this.fc = { yaw: 0, pitch: 0, speed: 60 };
+    this.input.resetFreeCam();
     this.running = true;
     this.time = 0;
     this.lastObj = new Map();
@@ -693,8 +696,43 @@ export class Game {
   }
 
   // ---------------- camera ----------------
+  setFreeCam(on) {
+    this.freeCam = on;
+    this.input.freeCam = on;
+    this.input.takeLook();
+    if (on) {
+      // start from wherever the chase camera is, looking the same way
+      _e.setFromQuaternion(this.camera.quaternion, 'YXZ');
+      this.fc.yaw = _e.y;
+      this.fc.pitch = _e.x;
+      this.input.stick.x = this.input.stick.y = 0;
+    }
+  }
+  updateFreeCamera(dt) {
+    const cam = this.camera, fc = this.fc, inp = this.input;
+    const l = inp.takeLook();
+    const turn = 1.6 * dt;   // arrow keys look around too
+    fc.yaw -= l.x + ((inp.key('ArrowRight') ? 1 : 0) - (inp.key('ArrowLeft') ? 1 : 0)) * turn;
+    fc.pitch -= l.y + ((inp.key('ArrowDown') ? 1 : 0) - (inp.key('ArrowUp') ? 1 : 0)) * turn;
+    fc.pitch = Math.max(-1.55, Math.min(1.55, fc.pitch));
+    if (l.wheel) fc.speed = Math.max(5, Math.min(2000, fc.speed * (l.wheel < 0 ? 1.25 : 0.8)));
+    _e.set(fc.pitch, fc.yaw, 0, 'YXZ');
+    cam.quaternion.setFromEuler(_e);
+    const mv = _v.set(
+      (inp.key('KeyD') ? 1 : 0) - (inp.key('KeyA') ? 1 : 0),
+      0,
+      (inp.key('KeyS') ? 1 : 0) - (inp.key('KeyW') ? 1 : 0),
+    ).applyQuaternion(cam.quaternion);
+    mv.y += (inp.key('KeyE') || inp.key('Space') ? 1 : 0) - (inp.key('KeyQ') || inp.key('ControlLeft') ? 1 : 0);
+    if (mv.lengthSq() > 1) mv.normalize();
+    const fast = inp.key('ShiftLeft') || inp.key('ShiftRight') ? 5 : 1;
+    cam.position.addScaledVector(mv, fc.speed * fast * dt);
+    cam.fov += (VISUALS.fov - cam.fov) * (1 - Math.exp(-dt * 4));
+    cam.updateProjectionMatrix();
+  }
   updateCamera(dt) {
     const cam = this.camera;
+    if (this.freeCam) { this.updateFreeCamera(dt); return; }
     if (this.me.alive) {
       const far = this.camMode === 1;
       const sc = this.shipType === 'hammer' ? 1.25 : this.shipType === 'warden' ? 1.2 : 1;
@@ -738,7 +776,13 @@ export class Game {
     this.time += dt;
     this.missionTime += dt;
     const c = this.input.poll(dt);
-    if (this.input.wasPressed('KeyC')) this.camMode = (this.camMode + 1) % 2;
+    const wantFree = this.input.freeCamWanted();
+    if (wantFree !== this.freeCam) this.setFreeCam(wantFree);
+    if (this.freeCam) {
+      // the keys and mouse drive the camera; the ship holds its course and throttle
+      c.pitch = c.yaw = c.roll = c.throttle = 0;
+      c.boost = c.fire = c.fire2 = false;
+    } else if (this.input.wasPressed('KeyC')) this.camMode = (this.camMode + 1) % 2;
 
     if (this.me.alive) {
       this.fly(dt, c);
@@ -802,9 +846,21 @@ export class Game {
     this.hitMarker = Math.max(0, (this.hitMarker || 0) - dt);
     this.hud.draw(this);
     if (this.hitMarker > 0) this.drawHitMarker();
+    if (this.freeCam) this.drawFreeCamHint();
     if (this.missionTime < 0) this.hud.centerText(`LAUNCH IN ${Math.ceil(-this.missionTime)}`, '#bfe8ff', this.hud.h * 0.4);
     this.composer.render();
     this.input.endFrame();
+  }
+
+  drawFreeCamHint() {
+    const ctx = this.hud.ctx;
+    const t = `FREE CAMERA · WASD + mouse · E/Q up/down · Shift fast · wheel ${Math.round(this.fc.speed)} m/s · Left Alt: back`;
+    ctx.font = '600 14px Rajdhani, sans-serif';
+    const w = ctx.measureText(t).width + 24, x = this.hud.w / 2, y = 64;
+    ctx.fillStyle = 'rgba(8,14,24,0.72)';
+    ctx.fillRect(x - w / 2, y - 16, w, 24);
+    ctx.fillStyle = '#bfe8ff'; ctx.textAlign = 'center';
+    ctx.fillText(t, x, y + 1);
   }
 
   drawHitMarker() {
@@ -822,9 +878,12 @@ export class Game {
     this.bloom.strength = VISUALS.bloomStrength;
     this.bloom.threshold = VISUALS.bloomThreshold;
     this.renderer.toneMappingExposure = VISUALS.exposure;
+    applyModelGlow();
   }
 
   dispose() {
+    this.input.freeCam = false;
+    this.input.resetFreeCam();
     this.renderer.toneMappingExposure = 1;
     this.running = false;
     window.removeEventListener('resize', this.onResize);
