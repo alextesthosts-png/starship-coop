@@ -232,6 +232,16 @@ export function restoreRevision(id, by) {
 function hashPassword(pw, salt = crypto.randomBytes(16).toString('hex')) {
   return { salt, hash: crypto.scryptSync(pw, salt, 64).toString('hex') };
 }
+// Lost password: give the ADMIN_RESET variable a new value and restart. The stored password is
+// deleted once (per value) and ADMIN_PASSWORD / ADMIN_USER from the variables apply again.
+{
+  const tok = process.env.ADMIN_RESET || '';
+  const mark = path.join(DATA_DIR, 'admin-reset.txt');
+  let last = ''; try { last = fs.readFileSync(mark, 'utf8').trim(); } catch {}
+  if (tok && tok !== last) {
+    try { fs.rmSync(ADMIN_FILE, { force: true }); fs.writeFileSync(mark, tok); console.log('admin password reset: using ADMIN_PASSWORD from the variables'); } catch (e) { console.error('admin reset failed', e); }
+  }
+}
 function readAdmin() {
   try { return JSON.parse(fs.readFileSync(ADMIN_FILE, 'utf8')); } catch { return null; }
 }
