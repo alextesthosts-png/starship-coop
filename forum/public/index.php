@@ -24,6 +24,7 @@ $routes = [
     ['POST', '#^/logout$#', 'act_logout'],
     ['GET', '#^/u/([^/]+)$#', 'page_profile'],
     ['GET|POST', '#^/settings$#', 'page_settings'],
+    ['GET|POST', '#^/game-link$#', 'page_game_link'],
     ['GET', '#^/search$#', 'page_search'],
     ['GET', '#^/admin$#', 'page_admin'],
     ['POST', '#^/admin/user$#', 'act_admin_user'],
@@ -343,6 +344,25 @@ function page_profile(string $name): void {
         . ($p['last_seen'] ? ' · last seen ' . ago((int)$p['last_seen']) : '') . '</p>'
         . ($p['bio'] ? '<div class="content">' . render_markup($p['bio']) . '</div>' : '') . '</div></div>
         <div class="card"><h3>Recent posts</h3>' . ($list ? '<ul class="recent">' . $list . '</ul>' : '<div class="empty">No posts yet.</div>') . '</div>', [$p['username'] => null]);
+}
+
+// "Sign in with your forum account" from the game: hands the game a signed pilot pass
+// (callsign + role, valid 30 days). The game checks the signature with the same GAME_LINK_SECRET.
+function page_game_link(): void {
+    $u = require_login();
+    $secret = getenv('GAME_LINK_SECRET') ?: '';
+    if ($secret === '') layout('Link to the game', '<div class="card"><h1>Link to the game</h1><p>Game sign-in isn\'t set up on this server yet (GAME_LINK_SECRET is missing).</p></div>');
+    if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+        require_post();
+        $b64 = fn(string $s): string => rtrim(strtr(base64_encode($s), '+/', '-_'), '=');
+        $body = $b64(json_encode(['u' => $u['username'], 'r' => $u['role'], 'exp' => time() + 30 * 86400], JSON_UNESCAPED_UNICODE));
+        $sig = $b64(hash_hmac('sha256', $body, $secret, true));
+        header('Location: ' . GAME_URL . '/#pilot=' . $body . '.' . $sig, true, 303);
+        exit;
+    }
+    layout('Link to the game', '<div class="card narrow"><h1>Fly as ' . h($u['username']) . '?</h1>
+      <p>The game will use your forum callsign <b>' . h($u['username']) . '</b> and your rank <b>' . h(ROLES[$u['role']] ?? 'Pilot') . '</b>, which unlocks the liveries for your rank. The link lasts 30 days on this browser.</p>
+      <form method="post">' . csrf_field() . '<button class="btn">Link and return to the game</button> <a class="btn ghost" href="' . h(GAME_URL) . '">Cancel</a></form></div>', ['Link to the game' => null]);
 }
 
 function page_settings(): void {

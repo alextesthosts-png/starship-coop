@@ -68,7 +68,7 @@ export class Game {
 
     this.scene = new THREE.Scene();
     this.camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.5, 40000);
-    this.env = this.mission.env === 'planet' ? buildPlanetEnv(this.scene) : buildSpaceEnv(this.scene, this.mission.id);
+    this.env = this.mission.env === 'planet' ? buildPlanetEnv(this.scene, this.mission) : buildSpaceEnv(this.scene, this.mission);
     this.particles = new Particles(this.scene);
     this.bolts = new Bolts(this.scene);
 
@@ -85,7 +85,8 @@ export class Game {
     this.def = SHIPS[me.ship];
     this.color = me.color;
     this.ship = new THREE.Group();
-    this.model = buildShip(me.ship, me.color);
+    this.model = buildShip(me.ship, me.color, { livery: me.livery });
+    this.guns = this.model.userData.guns || this.def.guns;   // marker editor guns win
     this.ship.add(this.model);
     this.scene.add(this.ship);
     this.me = {
@@ -104,6 +105,7 @@ export class Game {
     window.addEventListener('resize', this.onResize);
     this.resize();
     this.sfx.startEngine();
+    this.sfx.playMusic(this.mission.id);
     this.last = performance.now();
     this.loop = this.loop.bind(this);
     requestAnimationFrame(this.loop);
@@ -120,15 +122,15 @@ export class Game {
 
   placeAtSpawn(pos) {
     this.ship.position.set(...pos);
-    this.ship.quaternion.identity();
+    this.ship.quaternion.setFromAxisAngle(new THREE.Vector3(0, 1, 0), -THREE.MathUtils.degToRad(this.mission.heading || 0));
     this.ship.updateMatrixWorld();
-    this.camera.position.copy(this.ship.position).add(new THREE.Vector3(0, 4, 16));
-    this.camera.quaternion.identity();
+    this.camera.position.copy(this.ship.position).add(new THREE.Vector3(0, 4, 16).applyQuaternion(this.ship.quaternion));
+    this.camera.quaternion.copy(this.ship.quaternion);
   }
 
   addRemote(p) {
     if (this.remotes.has(p.id)) return;
-    const mesh = buildShip(p.ship, p.color);
+    const mesh = buildShip(p.ship, p.color, { livery: p.livery });
     mesh.visible = false;
     this.scene.add(mesh);
     this.remotes.set(p.id, { id: p.id, name: p.name, color: p.color, ship: p.ship, mesh, buf: [], alive: true, boost: 0 });
@@ -559,9 +561,10 @@ export class Game {
     if (c.fire && me.laserCool <= 0) {
       me.laserCool = S.laserRate;
       let guns;
-      if (S.gunMode === 'alternate') guns = [S.guns[me.gunIdx++ % S.guns.length]];
-      else if (S.gunMode === 'pairs') { const k = (me.gunIdx++ % 2) * 2; guns = [S.guns[k], S.guns[k + 1]]; }
-      else guns = S.guns;
+      const G = this.guns;
+      if (S.gunMode === 'alternate' || G.length < 2) guns = [G[me.gunIdx++ % G.length]];
+      else if (S.gunMode === 'pairs') { const half = Math.ceil(G.length / 2); const k = (me.gunIdx++ % 2) * half; guns = G.slice(k, k + half); }
+      else guns = G;
       // aim assist: converge on the lead point when it's close to the crosshair
       let conv = ship.position.clone().addScaledVector(fwd, 400);
       const t = this.entities.get(this.targetId);

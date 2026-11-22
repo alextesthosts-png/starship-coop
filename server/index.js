@@ -10,7 +10,8 @@ import * as C from './content.js';
 import * as F from './flags.js';
 import * as M from './media.js';
 import * as MET from './metrics.js';
-import { applyTuning } from '../shared/tuning.js';
+import crypto from 'node:crypto';
+import * as G from '../shared/gamecontent.js';
 import { SHIPS, MISSIONS, DIFFICULTY, MAX_PLAYERS, PLAYER_COLORS } from '../shared/config.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -24,6 +25,7 @@ const MIME = {
 };
 const STATIC = [
   { prefix: '/vendor/three/', dir: path.join(ROOT, 'node_modules/three'), allow: ['build/', 'examples/jsm/'] },
+  { prefix: '/vendor/meshoptimizer/', dir: path.join(ROOT, 'node_modules/meshoptimizer'), allow: ['meshopt_simplifier.js'] },
   { prefix: '/shared/', dir: path.join(ROOT, 'shared') },
   { prefix: '/', dir: path.join(ROOT, 'public') },
 ];
@@ -46,7 +48,8 @@ function send(ws, obj) {
 }
 
 class Room {
-  constructor(isPublic = true) {
+  constructor(isPublic = true, preview = false) {
+    this.preview = preview;   // preview rooms run on the admin's draft content
     this.code = makeCode();
     this.players = new Map();
     this.hostId = null;
@@ -95,8 +98,8 @@ class Room {
   }
   info() {
     return {
-      t: 'room', code: this.code, hostId: this.hostId, state: this.state, missionId: this.missionId, diff: this.diff, isPublic: this.isPublic,
-      players: [...this.players.values()].map((p) => ({ id: p.id, name: p.name, ship: p.ship, color: p.color, slot: p.slot, ready: p.ready })),
+      t: 'room', code: this.code, hostId: this.hostId, state: this.state, missionId: this.missionId, diff: this.diff, isPublic: this.isPublic, preview: this.preview,
+      players: [...this.players.values()].map((p) => ({ id: p.id, name: p.name, ship: p.ship, color: p.color, slot: p.slot, ready: p.ready, livery: p.livery || '', role: p.pilot?.role || '' })),
     };
   }
   broadcast(obj, exceptId = null) {
@@ -120,7 +123,7 @@ class Room {
   sendStart(p) {
     send(p.ws, {
       t: 'start', missionId: this.missionId, diff: this.diff, slot: p.slot, reserves: this.sim.reserves,
-      players: [...this.players.values()].map((q) => ({ id: q.id, name: q.name, ship: q.ship, color: q.color, slot: q.slot })),
+      players: [...this.players.values()].map((q) => ({ id: q.id, name: q.name, ship: q.ship, color: q.color, slot: q.slot, livery: q.livery || '' })),
       objectives: this.sim.objectives, time: this.sim.time, phase: this.sim.phase, scoreMul: this.sim.scoreMul,
     });
   }
@@ -128,9 +131,10 @@ class Room {
     p.inGame = true; p.alive = true; p.state = null;
     this.sim.playerJoined(p);
     this.sendStart(p);
-    this.broadcast({ t: 'pjoin', player: { id: p.id, name: p.name, ship: p.ship, color: p.color, slot: p.slot } }, p.id);
+    this.broadcast({ t: 'pjoin', player: { id: p.id, name: p.name, ship: p.ship, color: p.color, slot: p.slot, livery: p.livery || '' } }, p.id);
   }
-  tick() {
+  tick() { inContext(this, () => this.tickInner()); }
+  tickInner() {
     const sim = this.sim;
     if (!sim) return;
     try {
@@ -183,11 +187,57 @@ class Room {
 // ---------------- message handling ----------------
 const clean = (s, n) => String(s || '').replace(/[<>&"]/g, '').trim().slice(0, n);
 
-function allowedShip(ship) {
-  const ok = F.gameFlags().ships;
-  return ok[ship] ? ship : Object.keys(ok).find((k) => ok[k]) || 'lancer';
+// ---- content context: live content for everyone, the admin's draft inside preview rooms ----
+const liveDoc = () => C.getContent();
+const docFor = (room) => (room?.preview && C.getPreview()) || C.getContent();
+function applyLive() { G.applyGameContent(C.getContent()); }
+applyLive();
+function inContext(room, fn) {
+  if (!room?.preview || !C.getPreview()) return fn();
+  G.applyGameContent(C.getPreview());
+  try { return fn(); } finally { applyLive(); }
 }
-function firstMission() { const ok = F.gameFlags().missions; return Object.keys(ok).find((k) => ok[k]) || 'siege'; }
+// Feature flags plus admin-made ships and missions (custom missions can be event-only).
+function gameFlagsFull(doc = liveDoc()) {
+  const f = F.gameFlags();
+  const evs = G.activeEvents(doc.events);
+  for (const s of doc.customShips || []) f.ships[s.id] = s.enabled;
+  for (const m of doc.customMissions || []) f.missions[m.id] = m.enabled && (m.visibility === 'always' || evs.some((e) => e.missions.includes(m.id)));
+  return f;
+}
+function allowedShip(ship, room = null) {
+  const ok = gameFlagsFull(docFor(room)).ships;
+  const fits = (s) => ok[s] && SHIPS[s] && (!room || G.shipAllowedIn(s, room.missionId));
+  return fits(ship) ? ship : Object.keys(ok).find(fits) || 'lancer';
+}
+function firstMission(room = null) { const ok = gameFlagsFull(docFor(room)).missions; return Object.keys(ok).find((k) => ok[k] && MISSIONS.some((m) => m.id === k)) || 'siege'; }
+
+// ---- pilot pass: a link signed by the forum, proving the player's forum callsign and role ----
+const LINK_SECRET = process.env.GAME_LINK_SECRET || '';
+function verifyPilot(tok) {
+  if (!LINK_SECRET || typeof tok !== 'string' || tok.length > 800) return null;
+  const [body, sig] = tok.split('.');
+  if (!body || !sig) return null;
+  const want = crypto.createHmac('sha256', LINK_SECRET).update(body).digest('base64url');
+  if (sig.length !== want.length || !crypto.timingSafeEqual(Buffer.from(sig), Buffer.from(want))) return null;
+  let d; try { d = JSON.parse(Buffer.from(body, 'base64url').toString('utf8')); } catch { return null; }
+  if (!d || typeof d.u !== 'string' || !['user', 'moderator', 'admin'].includes(d.r) || !(d.exp > Date.now() / 1000)) return null;
+  return { name: clean(d.u, 16), role: d.r };
+}
+const roleOf = (p) => (p.isAdmin ? 'admin' : p.pilot?.role || 'everyone');
+// Which livery a player may fly: their pick if their role allows it (or an event unlocks it),
+// otherwise the livery given automatically to their role, otherwise factory paint.
+function liveryFor(p, wanted, doc = docFor(p.room)) {
+  if (wanted === 'none') return '';
+  const rank = G.roleRank(roleOf(p));
+  const evL = new Set(G.activeEvents(doc.events).flatMap((e) => e.liveries));
+  const ok = (l) => l && (evL.has(l.id) || (!l.eventOnly && rank >= G.roleRank(l.access)));
+  const L = doc.liveries || [];
+  const w = L.find((l) => l.id === wanted);
+  if (w && ok(w)) return w.id;
+  const auto = L.filter((l) => l.autoFor && rank >= G.roleRank(l.autoFor) && ok(l)).sort((a, b) => G.roleRank(b.autoFor) - G.roleRank(a.autoFor))[0];
+  return auto ? auto.id : '';
+}
 function broadcastAll(obj) { const s = JSON.stringify(obj); for (const ws of wss.clients) if (ws.readyState === 1) { ws.send(s); MET.trackWsOut(s.length); } }
 
 function maintenanceBlocked(p) {
@@ -200,33 +250,57 @@ function handle(p, msg) {
   const room = p.room;
   if (['create', 'join', 'quick', 'start'].includes(msg.t) && maintenanceBlocked(p)) return;
   switch (msg.t) {
-    case 'hello':
-      p.name = clean(msg.name, 16) || `Pilot-${p.id}`;
+    case 'hello': {
+      p.pilot = verifyPilot(msg.pilot);
+      p.name = p.pilot?.name || clean(msg.name, 16) || `Pilot-${p.id}`;
       if (SHIPS[msg.ship]) p.ship = msg.ship;
-      p.ship = allowedShip(p.ship);
+      p.ship = allowedShip(p.ship, room);
+      p.wantLivery = typeof msg.livery === 'string' ? msg.livery.slice(0, 20) : '';
+      p.livery = liveryFor(p, p.wantLivery);
+      send(p.ws, { t: 'me', name: p.name, pilot: p.pilot, livery: p.livery, isAdmin: !!p.isAdmin });
+      if (room) room.broadcastInfo();
+      break;
+    }
+    case 'livery':
+      if (!room || !p.inGame) {
+        p.wantLivery = typeof msg.livery === 'string' ? msg.livery.slice(0, 20) : '';
+        p.livery = liveryFor(p, p.wantLivery);
+        send(p.ws, { t: 'me', name: p.name, pilot: p.pilot, livery: p.livery, isAdmin: !!p.isAdmin });
+        room && room.broadcastInfo();
+      }
       break;
     case 'create': {
       if (room) room.remove(p);
-      const r = new Room(msg.isPublic !== false);
+      const preview = !!msg.preview && !!p.isAdmin && !!C.getPreview();
+      const r = new Room(preview ? false : msg.isPublic !== false, preview);
+      if (preview) inContext(r, () => { r.missionId = firstMission(r); });
       r.add(p);
+      inContext(r, () => { p.ship = allowedShip(p.ship, r); p.livery = liveryFor(p, p.wantLivery); });
+      r.broadcastInfo();
       break;
     }
     case 'join': {
       const r = rooms.get(String(msg.code || '').toUpperCase());
       if (!r) return send(p.ws, { t: 'error', msg: 'Room not found.' });
       if (r.players.size >= MAX_PLAYERS) return send(p.ws, { t: 'error', msg: 'That wing is full (4 pilots max).' });
+      if (r.preview && !p.isAdmin) return send(p.ws, { t: 'error', msg: 'That is an admin preview wing.' });
       if (room === r) return;
       if (room) room.remove(p);
       r.add(p);
+      inContext(r, () => { p.ship = allowedShip(p.ship, r); p.livery = liveryFor(p, p.wantLivery); });
+      r.broadcastInfo();
       break;
     }
     case 'quick': {
       if (room) room.remove(p);
       let best = null;
       for (const r of rooms.values()) {
-        if (r.isPublic && r.players.size < MAX_PLAYERS && (!best || r.players.size > best.players.size)) best = r;
+        if (r.isPublic && !r.preview && r.players.size < MAX_PLAYERS && (!best || r.players.size > best.players.size)) best = r;
       }
-      (best || new Room(true)).add(p);
+      const qr = best || new Room(true);
+      qr.add(p);
+      p.ship = allowedShip(p.ship, qr); p.livery = liveryFor(p, p.wantLivery);
+      qr.broadcastInfo();
       break;
     }
     case 'leave':
@@ -235,7 +309,8 @@ function handle(p, msg) {
       break;
     case 'ship':
       if (SHIPS[msg.ship] && (!room || !p.inGame)) {
-        if (!F.gameFlags().ships[msg.ship]) { send(p.ws, { t: 'error', msg: `The ${SHIPS[msg.ship].name} is grounded right now.` }); break; }
+        if (!gameFlagsFull(docFor(room)).ships[msg.ship]) { send(p.ws, { t: 'error', msg: `The ${SHIPS[msg.ship].name} is grounded right now.` }); break; }
+        if (room && !G.shipAllowedIn(msg.ship, room.missionId)) { send(p.ws, { t: 'error', msg: `The ${SHIPS[msg.ship].name} isn't cleared for this mission.` }); break; }
         p.ship = msg.ship; room && room.broadcastInfo();
       }
       break;
@@ -245,8 +320,10 @@ function handle(p, msg) {
     case 'mission':
       if (room && room.hostId === p.id && room.state === 'lobby') {
         if (MISSIONS.find((m) => m.id === msg.missionId)) {
-          if (F.gameFlags().missions[msg.missionId]) room.missionId = msg.missionId;
-          else send(p.ws, { t: 'error', msg: 'That mission is offline right now.' });
+          if (gameFlagsFull(docFor(room)).missions[msg.missionId]) {
+            room.missionId = msg.missionId;
+            for (const q of room.players.values()) q.ship = allowedShip(q.ship, room);   // some ships are cleared for certain missions only
+          } else send(p.ws, { t: 'error', msg: 'That mission is offline right now.' });
         }
         if (DIFFICULTY[msg.diff]) room.diff = msg.diff;
         if (typeof msg.isPublic === 'boolean') room.isPublic = msg.isPublic;
@@ -255,9 +332,9 @@ function handle(p, msg) {
       break;
     case 'start':
       if (room && room.hostId === p.id && room.state === 'lobby') {
-        const gf = F.gameFlags();
-        if (!gf.missions[room.missionId]) { send(p.ws, { t: 'error', msg: 'That mission is offline right now — pick another one.' }); break; }
-        for (const q of room.players.values()) q.ship = allowedShip(q.ship);
+        const gf = gameFlagsFull(docFor(room));
+        if (!gf.missions[room.missionId] || !MISSIONS.some((m) => m.id === room.missionId)) { send(p.ws, { t: 'error', msg: 'That mission is offline right now — pick another one.' }); break; }
+        for (const q of room.players.values()) { q.ship = allowedShip(q.ship, room); q.livery = liveryFor(q, q.wantLivery); }
         room.start();
       }
       break;
@@ -335,10 +412,18 @@ function readRaw(req, limit) {
 }
 
 async function handleApi(req, res, pathname) {
-  if (pathname === '/api/content' && req.method === 'GET') {
-    const c = C.getContent();
+  if ((pathname === '/api/content' || pathname === '/api/terrain') && req.method === 'GET') {
+    const admin = !!C.getSession(cookies(req).vw_admin);
+    const wantPreview = new URL(req.url, 'http://x').searchParams.get('preview') === '1';
+    const usePreview = admin && wantPreview && !!C.getPreview();
+    const c = usePreview ? C.getPreview() : C.getContent();
+    const hm = c.environment?.planet?.heightmap;
+    if (pathname === '/api/terrain') return hm ? json(res, 200, hm) : json(res, 404, { error: 'No custom terrain.' });
+    const env = { ...c.environment, planet: { ...c.environment.planet, heightmap: hm ? { n: hm.n, height: hm.height, keepBase: hm.keepBase, v: crypto.createHash('sha1').update(hm.data).digest('hex').slice(0, 12) } : null } };
+    const events = G.activeEvents(c.events).map((e) => ({ id: e.id, name: e.name, end: e.end, announcement: e.announcement, liveries: e.liveries, missions: e.missions }));
     return json(res, 200, { site: c.site, announcement: c.announcement, settings: c.settings, sections: c.sections.filter((x) => x.visible), changelog: c.changelog, tuning: c.tuning || {}, updatedAt: c.updatedAt,
-      flags: F.gameFlags(), env: envInfo() });
+      modelMarkers: c.modelMarkers, customShips: c.customShips, liveries: c.liveries, environment: env, sounds: c.sounds, customMissions: c.customMissions, events,
+      flags: gameFlagsFull(c), env: envInfo(), preview: usePreview, admin: admin ? { hasPreview: !!C.getPreview(), previewAt: C.getPreview()?.updatedAt || null } : null });
   }
   if (!pathname.startsWith('/api/admin/')) return json(res, 404, { error: 'not found' });
   const token = cookies(req).vw_admin;
@@ -364,12 +449,26 @@ async function handleApi(req, res, pathname) {
   if (!session) return json(res, 401, { error: 'Please log in.' });
   if (route === 'content' && req.method === 'GET') return json(res, 200, C.getContent());
   if (route === 'content' && req.method === 'PUT') {
-    let body; try { body = await readBody(req); } catch (e) { return json(res, 400, { error: e.message }); }
+    let body; try { body = await readBody(req, 4_000_000); } catch (e) { return json(res, 400, { error: e.message }); }
     const saved = C.saveContent(body, session.user);
     applyTuningChange(saved.tuning);
     return json(res, 200, saved);
   }
   if (route === 'revisions' && req.method === 'GET') return json(res, 200, C.listRevisions());
+  if (route === 'pilot-link' && req.method === 'GET') return json(res, 200, { configured: !!LINK_SECRET, forumUrl: C.getContent().site.forumUrl || '' });
+  // preview drafts: saved separately, only admins see them in the game until published
+  if (route === 'preview' && req.method === 'GET') return json(res, 200, { draft: C.getPreview() });
+  if (route === 'preview' && req.method === 'PUT') {
+    let body; try { body = await readBody(req, 4_000_000); } catch (e) { return json(res, 400, { error: e.message }); }
+    const draft = C.savePreview(body, session.user);
+    broadcastAll({ t: 'content', scope: 'preview' });
+    for (const r of rooms.values()) if (r.preview && r.state === 'lobby') inContext(r, () => { r.missionId = MISSIONS.some((m) => m.id === r.missionId) ? r.missionId : firstMission(r); r.broadcastInfo(); });
+    return json(res, 200, draft);
+  }
+  if (route === 'preview' && req.method === 'DELETE') { C.discardPreview(); broadcastAll({ t: 'content', scope: 'preview' }); return json(res, 200, { ok: true }); }
+  if (route === 'preview/publish' && req.method === 'POST') {
+    try { const live = C.publishPreview(session.user); applyContentChange('live'); return json(res, 200, live); } catch (e) { return json(res, 409, { error: e.message }); }
+  }
   if (route === 'revisions/restore' && req.method === 'POST') {
     let body; try { body = await readBody(req, 4096); } catch { return json(res, 400, { error: 'bad request' }); }
     try { const r = C.restoreRevision(String(body.id || ''), session.user); applyTuningChange(r.tuning); return json(res, 200, r); } catch { return json(res, 404, { error: 'Revision not found.' }); }
@@ -443,7 +542,7 @@ const server = http.createServer((req, res) => {
   if (pathname.startsWith('/media/') && (req.method === 'GET' || req.method === 'HEAD')) {
     return M.serve(req, res, pathname.slice(7)).catch((e) => { console.error('media', e); if (!res.headersSent) { res.writeHead(500); res.end(); } });
   }
-  if (pathname === '/api/flags') return json(res, 200, F.gameFlags());
+  if (pathname === '/api/flags') return json(res, 200, gameFlagsFull());
   if (pathname.startsWith('/api/') && pathname !== '/api/rooms') {
     return handleApi(req, res, pathname).catch((e) => { console.error('api error', e); json(res, 500, { error: 'server error' }); });
   }
@@ -453,7 +552,7 @@ const server = http.createServer((req, res) => {
     res.setHeader('x-robots-tag', 'noindex');
   }
   if (pathname === '/api/rooms') {
-    const list = [...rooms.values()].filter((r) => r.isPublic && r.players.size < MAX_PLAYERS).map((r) => ({
+    const list = [...rooms.values()].filter((r) => r.isPublic && !r.preview && r.players.size < MAX_PLAYERS).map((r) => ({
       code: r.code, players: r.players.size, state: r.state, mission: MISSIONS.find((m) => m.id === r.missionId)?.name,
       host: r.players.get(r.hostId)?.name,
     }));
@@ -481,17 +580,18 @@ const server = http.createServer((req, res) => {
 });
 
 const wss = new WebSocketServer({ server, path: '/ws', maxPayload: 64 * 1024 });
-wss.on('connection', (ws) => {
-  const p = { id: nextPlayerId++, ws, name: 'Pilot', ship: 'lancer', room: null, alive: false, inGame: false, state: null };
+wss.on('connection', (ws, req) => {
+  const p = { id: nextPlayerId++, ws, name: 'Pilot', ship: 'lancer', room: null, alive: false, inGame: false, state: null, livery: '', wantLivery: '', pilot: null };
+  p.isAdmin = !!C.getSession(cookies(req).vw_admin);   // signed into the admin panel on this site
   ws.isAlive = true;
   ws.on('pong', () => { ws.isAlive = true; });
-  send(ws, { t: 'welcome', id: p.id, flags: F.gameFlags() });
+  send(ws, { t: 'welcome', id: p.id, flags: gameFlagsFull() });
   ws.on('message', (data) => {
     MET.trackWsIn();
     let msg;
     try { msg = JSON.parse(data); } catch { return; }
     if (!msg || typeof msg.t !== 'string') return;
-    try { handle(p, msg); } catch (err) { console.error('handle error', err); }
+    try { inContext(p.room, () => handle(p, msg)); } catch (err) { console.error('handle error', err); }
   });
   ws.on('close', () => { if (p.room) p.room.remove(p); });
 });
@@ -505,28 +605,47 @@ setInterval(() => {
 }, 15000);
 
 // ---------------- flags: live updates to every player + lobby fix-ups ----------------
-// Live tuning: rewrite the shared config in this process, then tell every connected browser.
-let tuningJson = '';
-function applyTuningChange(tuning = {}) {
-  const clean = applyTuning(tuning);
-  const j = JSON.stringify(clean);
-  if (j === tuningJson) return;
-  tuningJson = j;
-  broadcastAll({ t: 'tuning', tuning: clean });
-  for (const room of rooms.values()) if (room.state === 'lobby') room.broadcastInfo();
+// Live content: rebuild the game tables in this process, then tell every connected browser to
+// reload its content (ships, missions, tuning, liveries, sounds...). Running missions keep going.
+function applyContentChange(scope = 'live') {
+  applyLive();
+  broadcastAll({ t: 'content', scope });
+  applyFlagChange();
 }
-applyTuning(C.getContent().tuning || {}); tuningJson = JSON.stringify(C.getContent().tuning || {});
+function applyTuningChange() { applyContentChange('live'); }
 
-function applyFlagChange(flags = F.gameFlags()) {
+function applyFlagChange(flags = gameFlagsFull()) {
   broadcastAll({ t: 'flags', flags });
   for (const room of rooms.values()) {
     if (room.state !== 'lobby') continue;   // missions in flight finish with the rules they started with
-    let changed = false;
-    if (!flags.missions[room.missionId]) { room.missionId = firstMission(); changed = true; }
-    for (const q of room.players.values()) { const s2 = allowedShip(q.ship); if (s2 !== q.ship) { q.ship = s2; changed = true; } }
-    if (changed) room.broadcastInfo();
+    inContext(room, () => {
+      const f = room.preview ? gameFlagsFull(docFor(room)) : flags;
+      let changed = false;
+      if (!f.missions[room.missionId] || !MISSIONS.some((m) => m.id === room.missionId)) { room.missionId = firstMission(room); changed = true; }
+      for (const q of room.players.values()) {
+        const s2 = allowedShip(q.ship, room); if (s2 !== q.ship) { q.ship = s2; changed = true; }
+        const l2 = liveryFor(q, q.wantLivery); if (l2 !== q.livery) { q.livery = l2; changed = true; }
+      }
+      room.broadcastInfo();
+    });
   }
 }
+
+// Scheduled events: every 10 s work out which are running, apply their flags, tell everyone when that changes.
+let eventKey = null;
+function checkEvents() {
+  const act = G.activeEvents(liveDoc().events);
+  F.setEventFlags(Object.assign({}, ...act.map((e) => e.flags)));
+  const key = act.map((e) => e.id).join(',');
+  if (eventKey !== null && key !== eventKey) {
+    console.log(`events now active: ${key || 'none'}`);
+    applyFlagChange();
+    broadcastAll({ t: 'content', scope: 'live' });
+  }
+  eventKey = key;
+}
+checkEvents();
+setInterval(checkEvents, 10000).unref();
 F.watchFlags(applyFlagChange);
 F.initRailwayFlags().then(() => applyFlagChange());
 MET.setGauges(() => ({

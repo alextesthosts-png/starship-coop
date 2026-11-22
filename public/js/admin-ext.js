@@ -39,7 +39,7 @@ function renderMediaStatus() {
     return;
   }
   $('dropzone').classList.remove('disabled');
-  const imgs = media.items.filter((m) => m.kind === 'image').length, models = media.items.length - imgs;
+  const imgs = media.items.filter((m) => m.kind === 'image').length, sounds = media.items.filter((m) => m.kind === 'sound').length, models = media.items.length - imgs - sounds;
   box.innerHTML = `<div class="stat-row"><div><b>${media.items.length}</b><span>files</span></div><div><b>${imgs}</b><span>images</span></div><div><b>${models}</b><span>models</span></div><div><b>${fmtBytes(s.bytes || 0)}</b><span>stored</span></div><div class="grow muted small">Railway bucket <code>${esc(s.bucket)}</code></div></div>`;
 }
 let filter = 'all';
@@ -52,6 +52,14 @@ function usedBy(url) {
   for (const [k, v] of Object.entries(d.settings.shipModels || {})) if (v === url) out.push(`${k} model`);
   if (d.sections.some((s) => s.body.includes(url))) out.push('a section');
   if (d.changelog.some((r) => r.items.some((t) => t.includes(url)))) out.push('changelog');
+  for (const c of d.customShips || []) if (c.model === url) out.push(`${c.name} model`);
+  for (const l of d.liveries || []) if (l.emblem === url) out.push(`${l.name} emblem`);
+  for (const [k, v] of Object.entries(d.environment?.panoramas || {})) if (v === url) out.push(`${k} backdrop`);
+  for (const v of Object.values(d.environment?.planet?.textures || {})) if (v === url) out.push('terrain texture');
+  if (d.environment?.planet?.heightmap?.src === url) out.push('terrain shape');
+  for (const [k, v] of Object.entries(d.sounds?.sfx || {})) if (v.url === url) out.push(`${k} sound`);
+  for (const [k, v] of Object.entries(d.sounds?.music || {})) if (v.url === url) out.push(`${k} music`);
+  if (d.modelMarkers?.[url]) out.push('markers');
   return out;
 }
 function renderMediaGrid() {
@@ -59,14 +67,14 @@ function renderMediaGrid() {
   const items = media.items.filter((m) => (filter === 'all' || m.kind === filter) && (!q || m.name.toLowerCase().includes(q)));
   $('media-grid').innerHTML = items.length ? items.map((m) => {
     const used = usedBy(m.url);
-    const thumb = m.kind === 'image' ? `<img src="${esc(m.url)}" alt="" loading="lazy">` : `<div class="model-thumb">GLB<small>${m.report?.triangles ? `${(m.report.triangles / 1000).toFixed(1)}k tris` : '3D model'}</small></div>`;
+    const thumb = m.kind === 'image' ? `<img src="${esc(m.url)}" alt="" loading="lazy">` : m.kind === 'sound' ? `<div class="model-thumb sound-thumb">♪<small>${esc((m.type || '').split('/')[1] || 'audio')}</small></div>` : `<div class="model-thumb">GLB<small>${m.report?.triangles ? `${(m.report.triangles / 1000).toFixed(1)}k tris` : '3D model'}</small></div>`;
     const warn = m.report?.warnings?.length ? `<span class="badge warn" title="${esc(m.report.warnings.join('\n'))}">${m.report.warnings.length} note${m.report.warnings.length > 1 ? 's' : ''}</span>` : '';
     return `<div class="media-card" data-key="${esc(m.key)}">
       <div class="media-thumb" data-act="view">${thumb}</div>
       <div class="media-meta"><div class="mname" title="${esc(m.name)}">${esc(m.name)}</div>
         <div class="hint small">${fmtBytes(m.size)}${m.width ? ` · ${m.width}×${m.height}` : ''} · ${new Date(m.uploadedAt).toLocaleDateString()}</div>
         <div class="badges">${used.map((u) => `<span class="badge">${esc(u)}</span>`).join('')}${warn}</div></div>
-      <div class="media-actions"><button class="mini" data-act="view">${m.kind === 'model' ? 'Inspect' : 'View'}</button><button class="mini" data-act="copy">Copy link</button><button class="mini danger" data-act="del">Delete</button></div>
+      <div class="media-actions"><button class="mini" data-act="view">${m.kind === 'model' ? 'Inspect' : m.kind === 'sound' ? '▶ Play' : 'View'}</button>${m.kind === 'model' ? '<button class="mini" data-act="markers">Markers</button><button class="mini" data-act="optimize">Optimize</button>' : ''}<button class="mini" data-act="copy">Copy link</button><button class="mini danger" data-act="del">Delete</button></div>
     </div>`;
   }).join('') : `<div class="card empty">${media.items.length ? 'Nothing matches.' : 'No files yet. Drop some above.'}</div>`;
 }
@@ -82,8 +90,10 @@ $('media-grid').addEventListener('click', async (e) => {
     try { await V.api('DELETE', `media?key=${encodeURIComponent(m.key)}`); V.toast('Deleted.'); loadMedia(); } catch (err) { V.toast(err.message); }
   } else if (b.dataset.act === 'view') {
     if (m.kind === 'image') openModal(m.name, `<img class="full-img" src="${esc(m.url)}" alt=""><p class="hint">${m.width}×${m.height} · ${fmtBytes(m.size)} · <code>${esc(m.url)}</code></p>`);
+    else if (m.kind === 'sound') openModal(m.name, `<audio controls autoplay src="${esc(m.url)}" style="width:100%"></audio><p class="hint">${fmtBytes(m.size)} · <code>${esc(m.url)}</code>. Assign it on the <b>Sounds</b> page.</p>`);
     else openModelInspector(m);
-  }
+  } else if (b.dataset.act === 'markers') window.VWS?.openMarkerEditor(m.url, m.name);
+  else if (b.dataset.act === 'optimize') window.VWS?.openOptimizer({ url: m.url, name: m.name });
 });
 $('btn-resync').onclick = async () => {
   try { const r = await V.api('POST', 'media/resync'); media.items = r.items; renderMediaStatus(); renderMediaGrid(); V.toast(`Bucket re-scanned: ${r.count} files.`); } catch (e) { V.toast(e.message); }
@@ -174,7 +184,7 @@ async function openModelInspector(m, onUse) {
   if (onUse) onUse($('use-slot'));
   viewer = await makeViewer($('viewer'), m.url);
 }
-async function makeViewer(el, src) {
+async function makeViewer(el, src, opts = {}) {
   const THREE = await import('three');
   const { GLTFLoader } = await import('three/addons/loaders/GLTFLoader.js');
   const { OrbitControls } = await import('three/addons/controls/OrbitControls.js');
@@ -195,19 +205,22 @@ async function makeViewer(el, src) {
   try {
     const root = typeof src === 'string' ? (await new GLTFLoader().loadAsync(src)).scene : src;
     scene.add(root);
+    scene.userData.root = root;
     const box = new THREE.Box3().setFromObject(root); const size = box.getSize(new THREE.Vector3()); const c = box.getCenter(new THREE.Vector3());
     const R = Math.max(size.x, size.y, size.z) || 1;
     root.traverse((o) => {
       const col = /^engine/i.test(o.name) ? 0xffb347 : /^gun/i.test(o.name) ? 0xff5a4a : null;
-      if (col && !o.isMesh) o.add(new THREE.Mesh(new THREE.SphereGeometry(R * 0.025, 12, 8), new THREE.MeshBasicMaterial({ color: col, depthTest: false })));
+      if (col && !o.isMesh && !opts.hideFileMarkers) o.add(new THREE.Mesh(new THREE.SphereGeometry(R * 0.025, 12, 8), new THREE.MeshBasicMaterial({ color: col, depthTest: false })));
     });
     const arrow = new THREE.ArrowHelper(new THREE.Vector3(0, 0, -1), new THREE.Vector3(c.x, c.y, box.min.z), R * 0.35, 0x6fd6ff, R * 0.08, R * 0.05);
     scene.add(arrow);
     scene.add(new THREE.Box3Helper(box, 0x2a7aa0));
     cam.position.set(c.x + R * 0.9, c.y + R * 0.6, c.z + R * 1.1); controls.target.copy(c); controls.update();
   } catch (e) { el.innerHTML = `<div class="err-box">Could not load this model: ${esc(e.message)}</div>`; disposeAll(); return { dispose() {} }; }
-  (function loop() { if (!running) return; requestAnimationFrame(loop); controls.update(); renderer.render(scene, cam); })();
-  return { dispose: disposeAll };
+  const hooks = [];
+  (function loop() { if (!running) return; requestAnimationFrame(loop); controls.update(); for (const h of hooks) h(); renderer.render(scene, cam); })();
+  const root = scene.children.find((o) => o.isGroup || o.type === 'Group' || o.type === 'Object3D') || null;
+  return { dispose: disposeAll, THREE, scene, cam, controls, renderer, root: scene.userData.root, onFrame: (f) => hooks.push(f) };
 }
 
 // ================= SHIPS & MODELS =================
@@ -224,7 +237,7 @@ function renderShips() {
     const extra = k === 'dreadnought' && cur ? '<div class="hint small">The Ravager\'s turrets, generators and hitbox keep their built-in places, so use a model with a similar shape.</div>' : '';
     return `<div class="card ship-row" data-ship="${k}"><div class="ship-name"><b>${esc(name)}</b><span class="hint">${esc(role)}</span></div>
       <label class="fld grow"><span>3D model</span><select data-ship-model="${k}">${opts}</select></label>
-      <div class="ship-btns">${cur ? '<button class="mini" data-act="inspect">Inspect</button>' : builtin ? '<button class="mini" data-act="inspect-builtin">View built-in</button>' : ''}</div>
+      <div class="ship-btns">${cur ? '<button class="mini" data-act="inspect">Inspect</button>' : builtin ? '<button class="mini" data-act="inspect-builtin">View built-in</button>' : ''}${cur || builtin ? `<button class="mini" data-act="markers">Markers${d.modelMarkers?.[cur || builtin] ? ' ✓' : ''}</button>` : ''}</div>
       <div class="ship-notes">${notes}${extra}${cur && !m ? '<div class="warn-box small">⚠ This file is no longer in the library.</div>' : ''}</div></div>`;
   }).join('')).join('') + (models.length ? '' : '<p class="hint">Upload a .glb, or an .obj package (.zip), in the Media library to offer it here.</p>');
 }
@@ -237,6 +250,7 @@ $('ship-models').addEventListener('click', async (e) => {
   const b = e.target.closest('[data-act]'); if (!b) return;
   const k = b.closest('.ship-row').dataset.ship; const d = V.getDoc();
   if (b.dataset.act === 'inspect') { const m = media.items.find((x) => x.url === d.settings.shipModels[k]); if (m) openModelInspector(m); }
+  if (b.dataset.act === 'markers') { const url = V.getDoc().settings.shipModels?.[k] || BUILTIN_GLB[k]; window.VWS?.openMarkerEditor(url, url.split('/').pop()); return; }
   if (b.dataset.act === 'inspect-builtin') {
     let report = {};
     try { report = await V.api('GET', `inspect-builtin?ship=${k}`); } catch (err) { report = { warnings: [`Couldn't read the model's details: ${err.message}`] }; }
@@ -510,19 +524,22 @@ async function openObjConverter(files) {
       <div class="row2"><label class="fld"><span>Nose points to</span><select id="obj-fwd">${axisOpt('-z')}</select></label>
       <label class="fld"><span>Top points to</span><select id="obj-up">${axisOpt('+y')}</select></label></div>
       <div class="row2"><button class="mini" id="obj-turn">↻ Turn 90°</button><button class="mini" id="obj-flip">⇅ Flip upright</button></div>
-      <label class="fld"><span>Max texture size</span><select id="obj-tex"><option>1024</option><option selected>2048</option><option>4096</option></select></label>
+      <div id="obj-opt"></div>
+      <label class="fld"><span>Max texture size</span><select id="obj-tex"><option>512</option><option>1024</option><option selected>2048</option><option>4096</option></select></label>
       <label class="switch"><input type="checkbox" id="obj-keep" checked> <span>Keep the model's own look (no pilot colour)</span></label>
     </div>
     <p class="hint small">Turn the model until its nose follows the cyan arrow and its top faces up. The game scales it to fit the ship it replaces, and adds an engine glow at the tail if it has no engine markers.</p>
     <button class="btn" id="obj-go">Convert &amp; upload</button><div id="obj-result"></div>`;
+  let shown = loaded.root;   // what the viewer shows: the original or the optimized copy
   const preview = () => {
     const fwd = $('obj-fwd').value, up = $('obj-up').value;
     if (!C.orientation(fwd, up)) { $('obj-result').innerHTML = '<div class="warn-box small">Nose and top can\'t be on the same axis.</div>'; return; }
     $('obj-result').innerHTML = '';
     view?.dispose();
     view = null;
-    makeViewer($('viewer'), C.prepareForExport(loaded.root, { forward: fwd, up, keepLook: $('obj-keep').checked })).then((v) => { view = v; viewer = v; });
+    makeViewer($('viewer'), C.prepareForExport(shown, { forward: fwd, up, keepLook: $('obj-keep').checked })).then((v) => { view = v; viewer = v; });
   };
+  const opt = window.VWS ? await window.VWS.optimizerControls($('obj-opt'), loaded.root, { onShow: (o) => { shown = o; preview(); } }) : null;
   const ring = ['-z', '-x', '+z', '+x'];
   $('obj-turn').onclick = () => { const f = $('obj-fwd').value; const i = ring.indexOf(f); $('obj-fwd').value = i < 0 ? '-z' : ring[(i + 1) % 4]; preview(); };
   $('obj-flip').onclick = () => { const u = $('obj-up').value; $('obj-up').value = u[0] === '+' ? `-${u[1]}` : `+${u[1]}`; preview(); };
@@ -531,7 +548,8 @@ async function openObjConverter(files) {
   $('obj-go').onclick = async () => {
     const btn = $('obj-go'); btn.disabled = true; btn.textContent = 'Converting…';
     try {
-      const holder = C.prepareForExport(loaded.root, { forward: $('obj-fwd').value, up: $('obj-up').value, keepLook: $('obj-keep').checked });
+      const src = opt ? (await opt.result()).root : loaded.root;
+      const holder = C.prepareForExport(src, { forward: $('obj-fwd').value, up: $('obj-up').value, keepLook: $('obj-keep').checked });
       const buf = await C.exportGlb(holder, { maxTextureSize: +$('obj-tex').value });
       const name = `${($('obj-name').value || baseName).replace(/[^\w.-]+/g, '-')}.glb`;
       if (buf.byteLength > 40 * 1048576) throw new Error(`The converted model is ${fmtBytes(buf.byteLength)}, over the 40 MB limit. Pick a smaller texture size or reduce the triangle count.`);
@@ -544,3 +562,5 @@ async function openObjConverter(files) {
     } catch (e) { $('obj-result').innerHTML = `<div class="err-box small">${esc(e.message)}</div>`; btn.disabled = false; btn.textContent = 'Convert & upload'; }
   };
 }
+
+export { makeViewer, openModal, closeModal, uploadOne, loadMedia, fmtBytes, media, openModelInspector, esc as escAdmin };

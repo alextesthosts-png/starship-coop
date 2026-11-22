@@ -31,13 +31,24 @@
         </div>
       </header>
 
+      <div id="preview-bar" class="preview-bar hidden">
+        <span>🧪 <b>Admin preview draft</b> <span id="preview-when" class="muted"></span></span>
+        <label class="switch"><input type="checkbox" id="preview-toggle"> <span>Fly with the draft</span></label>
+      </div>
       <div class="card launch-card">
         <div id="announce" class="announce hidden"></div>
+        <div id="event-banner" class="event-banner hidden"></div>
         <div class="step"><span class="step-n">1</span> <span id="c-step1">Choose your callsign</span></div>
         <input id="name" maxlength="16" placeholder="e.g. Nightjar" autocomplete="off" aria-label="Callsign" />
+        <div id="pilot-row" class="pilot-row">
+          <span id="pilot-chip" class="pilot-chip hidden"></span>
+          <a id="pilot-signin" class="link hidden" href="#">Sign in with your forum account</a>
+          <button id="pilot-signout" class="link hidden">sign out</button>
+        </div>
 
         <div class="step"><span class="step-n">2</span> <span id="c-step2">Pick a starfighter</span></div>
         <div id="ship-select" class="ship-select"></div>
+        <div id="livery-row" class="livery-row hidden"><label for="livery">Paint</label><select id="livery"></select><span id="livery-note" class="muted"></span></div>
 
         <div class="step"><span class="step-n">3</span> <span id="c-step3">Launch</span></div>
         <div class="menu-buttons">
@@ -55,6 +66,7 @@
         <nav class="tabs" role="tablist">
           <button class="tab on" data-tab="tab-rooms" data-key="rooms" role="tab">Open Wings</button>
           <button class="tab" data-tab="tab-howto" data-key="howto" role="tab">How to Play</button>
+          <button class="tab" data-tab="tab-hangar" data-key="hangar" role="tab">Hangar</button>
           <button class="tab" data-tab="tab-changelog" data-key="changelog" role="tab">Changelog</button>
           <a class="tab ext" id="forum-tab" href="https://vanguard-forum-production.up.railway.app" target="_blank" rel="noopener">Forum ↗</a>
         </nav>
@@ -100,6 +112,16 @@
                 <li>Shields recharge after a few seconds out of fire. Hull doesn't.</li>
                 <li>Reserve ships are shared by the whole wing. Bonus objectives earn silver and gold medals.</li>
               </ul>
+            </div>
+          </div>
+        </div>
+
+        <div id="tab-hangar" class="tab-body hidden">
+          <div class="hangar">
+            <div class="hangar-view"><canvas id="hangar-canvas"></canvas><div id="hangar-loading" class="muted">Rolling the ships out…</div></div>
+            <div class="hangar-side">
+              <div id="hangar-list" class="hangar-list"></div>
+              <div id="hangar-info" class="hangar-info"></div>
             </div>
           </div>
         </div>

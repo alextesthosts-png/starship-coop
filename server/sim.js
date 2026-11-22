@@ -54,9 +54,9 @@ export class Sim {
     this.reserves = this.diff.reserves + (this.humans - 1) * 2 + (this.flags.extraReserves ? 2 : 0);
     this.respawns = []; // {pid, at}
     this.counters = { fighterKills: 0 };
-    this.asteroids = this.env === 'space' && this.def.id === 'convoy' ? asteroids() : [];
+    this.asteroids = this.env === 'space' && (this.def.id === 'convoy' || this.def.space === 'asteroids') ? asteroids() : [];
     for (const p of room.players.values()) this.ensureStats(p.id);
-    this.script = SCRIPTS[this.def.id](this);
+    this.script = (this.def.custom ? SCRIPTS.custom : SCRIPTS[this.def.id])(this);
     this.script.init();
     if (this.flags.aiWingmates) this.spawnWings();
   }
@@ -465,7 +465,7 @@ export class Sim {
       tower = towers[Math.floor(Math.random() * towers.length)];
       if (tower) e.ai.towerId = tower.id;
     }
-    const center = tower ? _c.copy(tower.pos).add(new THREE.Vector3(0, 170, 0)) : _c.set(0, 250, 0);
+    const center = tower ? _c.copy(tower.pos).add(new THREE.Vector3(0, 170, 0)) : _c.copy(this.script.focus ? this.script.focus() : ZERO).add(new THREE.Vector3(0, 100, 0));
     const rel = _b.subVectors(e.pos, center); rel.y = 0;
     const dist = rel.length() || 1;
     const desired = _des;
@@ -553,8 +553,25 @@ export class Sim {
   }
 
   freighterAI(e, dt) {
-    e.pos.z += ENEMIES.freighter.speed * dt;
-    e.vel.set(0, 0, ENEMIES.freighter.speed);
+    if (e.data.route) {
+      // custom missions: follow the admin's route, escape at its last point
+      const pts = e.data.route;
+      const sp = ENEMIES.freighter.speed;
+      const tgt = _a.set(...pts[e.data.ri]);
+      const d = _b.subVectors(tgt, e.pos);
+      const dist = d.length();
+      if (dist < sp * dt * 1.5 + 8) {
+        e.data.ri++;
+        if (e.data.ri >= pts.length) { this.script.escaped(e); return; }
+      }
+      d.normalize();
+      e.vel.copy(d).multiplyScalar(sp);
+      e.pos.addScaledVector(d, sp * dt);
+      _m.lookAt(ZERO, d, UP); _q.setFromRotationMatrix(_m); e.quat.slerp(_q, Math.min(1, dt * 1.5));
+    } else {
+      e.pos.z += ENEMIES.freighter.speed * dt;
+      e.vel.set(0, 0, ENEMIES.freighter.speed);
+    }
     e.cool -= dt;
     if (e.cool <= 0 && this.phase === 'run') {
       const p = this.nearestPlayer(e.pos, 520);
@@ -565,7 +582,7 @@ export class Sim {
         e.cool = 0.5 / this.diff.fire;
       } else e.cool = 0.4;
     }
-    if (e.pos.z >= CONVOY.gateZ) this.script.escaped(e);
+    if (!e.data.route && e.pos.z >= CONVOY.gateZ) this.script.escaped(e);
   }
 
   // ---------- players ----------
@@ -631,7 +648,147 @@ export class Sim {
 }
 
 // ======================= Mission scripts =======================
+const mmss = (s) => `${Math.floor(s / 60)}:${String(Math.round(s) % 60).padStart(2, '0')}`;
 const SCRIPTS = {
+  // Missions built in the admin panel's mission editor: waves, towers, turrets, a convoy route,
+  // a time limit and bonus goals, all described by data.
+  custom(sim) {
+    const cm = sim.def.custom;
+    const planet = cm.env === 'planet';
+    const W = cm.waves, T = cm.towers.length, route = cm.route, F = route ? route.freighters : 0;
+    const from = cm.messages.from || 'Control';
+    const air = (x, z, alt) => (planet ? Math.max(terrainHeight(x, z) + 70, alt) : alt);
+    let clock = 0, wi = 0, waveActive = false, clearT = 0, towersLost = 0, escaped = 0, destroyed = 0, kills = 0, convoyOut = false, turretsLeft = 0;
+    const focusV = (() => {
+      if (T) { const c = cm.towers.reduce((a, t) => [a[0] + t[0] / T, a[1] + t[1] / T], [0, 0]); return new THREE.Vector3(c[0], planet ? terrainHeight(c[0], c[1]) + 120 : 0, c[1]); }
+      if (route) { const p = route.points[Math.floor(route.points.length / 2)]; return new THREE.Vector3(p[0], air(p[0], p[1], route.alt), p[1]); }
+      return new THREE.Vector3(0, planet ? 200 : 0, 0);
+    })();
+    const waveEnemies = () => { let n = 0; for (const e of sim.entities.values()) if (e.team === 'enemy' && e.data.wave) n++; return n; };
+    function spawnWave(w, idx) {
+      for (const g of w.groups) {
+        const n = sim.count(g.count);
+        for (let i = 0; i < n; i++) {
+          const a = (i / n) * Math.PI * 2, r = 25 + n * 7;
+          const x = g.pos[0] + Math.cos(a) * r, z = g.pos[1] + Math.sin(a) * r;
+          sim.spawn(g.type, [x, air(x, z, g.alt) + rnd(-25, 25), z], { lookAt: focusV.toArray(), data: { wave: idx + 1 } });
+        }
+      }
+      sim.banner(w.title || `WAVE ${idx + 1} / ${W.length}`, w.message || '');
+      if (w.message) sim.msg(from, w.message);
+    }
+    function launchConvoy() {
+      convoyOut = true;
+      const pts = route.points.map(([x, z]) => [x, air(x, z, route.alt), z]);
+      for (let i = 0; i < F; i++) {
+        const [x, y, z] = pts[0];
+        const back = new THREE.Vector3(pts[0][0] - pts[1][0], 0, pts[0][2] - pts[1][2]).normalize().multiplyScalar(i * 140);
+        const side = (i % 2 ? 1 : -1) * 40;
+        sim.spawn('freighter', [x + back.x + side, y + rnd(-15, 15), z + back.z], { lookAt: pts[1], hpMul: 0.75 + 0.25 * sim.humans, data: { route: pts, ri: 1 } });
+      }
+      sim.banner('CONVOY SIGHTED', `${F} freighter${F > 1 ? 's' : ''} on the move`);
+      sim.msg(from, 'Convoy is moving. Stop those freighters before they reach the end of their route!');
+    }
+    function check() {
+      if (sim.phase !== 'run') return;
+      const wavesDone = wi >= W.length && waveEnemies() === 0;
+      const convoyDone = !route || (convoyOut && destroyed + escaped >= F);
+      const turretsDone = !cm.turretsRequired || !cm.turrets.length || turretsLeft === 0;
+      if (wavesDone && convoyDone && turretsDone) sim.finish(true, cm.messages.win || 'Mission accomplished.');
+    }
+    return {
+      init() {
+        for (const [x, z] of cm.towers) sim.spawn('tower', [x, (planet ? terrainHeight(x, z) : 0) + 45, z], { static: true });
+        for (const t of cm.turrets) {
+          const [x, z] = t.pos;
+          sim.spawn('turret', [x, planet ? terrainHeight(x, z) + 6 : t.alt, z], { static: true, data: { custom: true } });
+          turretsLeft++;
+        }
+        const objs = [];
+        if (W.length) objs.push({ id: 'waves', text: 'Repel the attack waves', progress: `0/${W.length}`, status: 'active' });
+        if (T) objs.push({ id: 'towers', text: 'Protect the relay towers', progress: `${T}/${T}`, status: 'active' });
+        if (route) {
+          objs.push({ id: 'freighters', text: 'Stop the convoy freighters', progress: `0/${F}`, status: 'active' });
+          objs.push({ id: 'escape', text: `Escaped (max ${route.maxEscape})`, progress: '0', status: 'active' });
+        }
+        if (cm.turretsRequired && cm.turrets.length) objs.push({ id: 'turrets', text: 'Destroy the defense turrets', progress: `0/${cm.turrets.length}`, status: 'active' });
+        if (cm.timeLimit) objs.push({ id: 'time', text: `Finish within ${mmss(cm.timeLimit)}`, status: 'active' });
+        const B = cm.bonus;
+        if (B.noTowerLoss && T) objs.push({ id: 'b_towers', text: 'BONUS: Lose no relay towers', status: 'active', bonus: true });
+        if (B.time) objs.push({ id: 'b_time', text: `BONUS: Finish in under ${mmss(B.time)}`, status: 'active', bonus: true });
+        if (B.noEscape && route) objs.push({ id: 'b_noescape', text: 'BONUS: Let no freighter escape', status: 'active', bonus: true });
+        if (B.kills) objs.push({ id: 'b_kills', text: `BONUS: Destroy ${B.kills} enemies`, progress: `0/${B.kills}`, status: 'active', bonus: true });
+        if (B.noDeaths) objs.push({ id: 'b_deaths', text: 'BONUS: Lose no ships', status: 'active', bonus: true });
+        if (!objs.length) objs.push({ id: 'survive', text: 'Survive', status: 'active' });
+        sim.setObjectives(objs);
+        sim.msg(from, cm.messages.start || `Vanguard Wing, ${cm.name} is a go. Good hunting.`);
+      },
+      start() {},
+      focus() { return focusV; },
+      update(dt) {
+        clock += dt;
+        // waves: "after the previous wave is cleared (+ delay)" or "at a fixed time"
+        while (wi < W.length) {
+          const w = W[wi];
+          let go;
+          if (w.trigger === 'time') go = clock >= w.at;
+          else { if (!waveActive) clearT += dt; go = !waveActive && clearT >= w.delay; }
+          if (!go) break;
+          spawnWave(w, wi);
+          wi++; waveActive = true; clearT = 0;
+        }
+        if (waveActive && waveEnemies() === 0) {
+          waveActive = false; clearT = 0;
+          sim.updObj('waves', { progress: `${wi}/${W.length}` });
+          if (wi >= W.length) sim.updObj('waves', { status: 'done' });
+          else if (W[wi].trigger === 'clear') sim.msg(from, `Wave ${wi} down. More contacts inbound.`);
+        }
+        if (route && !convoyOut && clock >= route.startAt) launchConvoy();
+        if (cm.timeLimit && clock > cm.timeLimit) { sim.updObj('time', { status: 'failed' }); sim.finish(false, cm.messages.lose || 'Out of time.'); return; }
+        if (cm.bonus.time && clock > cm.bonus.time) sim.updObj('b_time', { status: 'failed' });
+        if (cm.bonus.noDeaths && [...sim.stats.values()].some((st) => st.deaths > 0)) sim.updObj('b_deaths', { status: 'failed' });
+        check();
+      },
+      escaped(e) {
+        sim.entities.delete(e.id);
+        sim.emit({ e: 'warp', id: e.id, at: arr(e.pos) });
+        escaped++;
+        sim.updObj('escape', { progress: `${escaped}` });
+        sim.updObj('freighters', { progress: `${destroyed + escaped}/${F}` });
+        sim.updObj('b_noescape', { status: 'failed' });
+        if (escaped > route.maxEscape) { sim.updObj('freighters', { status: 'failed' }); sim.finish(false, cm.messages.lose || 'Too many freighters escaped.'); return; }
+        sim.msg(from, 'A freighter got away!');
+        check();
+      },
+      onKill(e) {
+        if (e.team === 'enemy') {
+          kills++;
+          if (cm.bonus.kills) { sim.updObj('b_kills', { progress: `${Math.min(kills, cm.bonus.kills)}/${cm.bonus.kills}` }); if (kills >= cm.bonus.kills) sim.updObj('b_kills', { status: 'done' }); }
+        }
+        if (e.type === 'freighter') { destroyed++; sim.updObj('freighters', { progress: `${destroyed + escaped}/${F}` }); sim.msg(from, `Freighter destroyed! ${F - destroyed - escaped} left.`); }
+        if (e.type === 'turret' && e.data.custom) { turretsLeft--; sim.updObj('turrets', { progress: `${cm.turrets.length - turretsLeft}/${cm.turrets.length}` }); }
+        if (e.type === 'tower') {
+          towersLost++;
+          sim.updObj('towers', { progress: `${T - towersLost}/${T}` });
+          sim.updObj('b_towers', { status: 'failed' });
+          if (towersLost >= T) { sim.updObj('towers', { status: 'failed' }); sim.finish(false, cm.messages.lose || 'All relay towers were destroyed.'); return; }
+          sim.msg(from, `Relay tower down! ${T - towersLost} remaining!`);
+        }
+        check();
+      },
+      finalize(success) {
+        if (!success) return;
+        if (T && towersLost === 0) sim.updObj('b_towers', { status: 'done' });
+        if (cm.bonus.time && clock <= cm.bonus.time) sim.updObj('b_time', { status: 'done' });
+        if (route && escaped === 0) sim.updObj('b_noescape', { status: 'done' });
+        if (route) sim.updObj('escape', { status: 'done' });
+        if (cm.timeLimit) sim.updObj('time', { status: 'done' });
+        if (cm.bonus.noDeaths && ![...sim.stats.values()].some((st) => st.deaths > 0)) sim.updObj('b_deaths', { status: 'done' });
+        sim.updObj('survive', { status: 'done' });
+      },
+    };
+  },
+
   siege(sim) {
     let wave = 0, waveActive = false, waveDelay = 0;
     let towersLost = 0;

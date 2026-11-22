@@ -49,10 +49,14 @@ function railwayValue(name) {
 }
 
 // ---------------- resolution ----------------
+// Scheduled events switch flags on and off for their time window. A manual override still wins.
+let eventValues = {};
+export function setEventFlags(map) { eventValues = map || {}; }
 export function resolveAll() {
   const out = {};
   for (const f of FLAG_DEFS) {
     if (typeof overrides[f.name] === 'boolean') out[f.name] = overrides[f.name];
+    else if (typeof eventValues[f.name] === 'boolean') out[f.name] = eventValues[f.name];
     else { const r = railwayValue(f.name); out[f.name] = typeof r === 'boolean' ? r : f.default; }
   }
   // safety net: never switch off every mission or every ship
@@ -66,7 +70,7 @@ export function describeAll() {
   const eff = resolveAll();
   return FLAG_DEFS.map((f) => {
     const r = railwayValue(f.name);
-    const source = typeof overrides[f.name] === 'boolean' ? 'override' : typeof r === 'boolean' ? 'railway' : 'default';
+    const source = typeof overrides[f.name] === 'boolean' ? 'override' : typeof eventValues[f.name] === 'boolean' ? 'event' : typeof r === 'boolean' ? 'railway' : 'default';
     return { ...f, value: eff[f.name], source, railway: r ?? null, override: overrides[f.name] ?? null };
   });
 }

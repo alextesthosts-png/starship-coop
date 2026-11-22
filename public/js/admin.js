@@ -2,6 +2,7 @@
 import { render as renderMarkup, inline as inlineMarkup, escapeHtml as esc } from '/shared/markup.js';
 
 const $ = (id) => document.getElementById(id);
+let draftAt = null;   // when the preview draft was saved, if there is one
 let doc = null;          // working copy of the site content
 let savedJson = '';      // last saved version, to detect unsaved changes
 let me = null;
@@ -45,8 +46,14 @@ $('btn-logout').onclick = async () => {
 
 async function openApp() {
   me = await api('GET', 'me');
-  doc = await api('GET', 'content');
+  const live = await api('GET', 'content');
+  let draft = null;
+  try { draft = (await api('GET', 'preview')).draft; } catch {}
+  // with a preview draft waiting, keep editing the draft
+  doc = draft || live;
+  draftAt = draft?.updatedAt || null;
   savedJson = JSON.stringify(doc);
+  renderDraftBar();
   window.VW = { api, toast, esc, getDoc: () => doc, changed, fillBindings, me };
   window.dispatchEvent(new Event('vw-ready'));
   $('login').classList.add('hidden'); $('app').classList.remove('hidden');
@@ -61,7 +68,7 @@ function setPath(o, p, v) { const ks = p.split('.'); const last = ks.pop(); ks.r
 function isDirty() { return doc && JSON.stringify(doc) !== savedJson; }
 function updateStatus(text, cls = '') {
   const dirty = isDirty();
-  $('btn-save').disabled = !dirty;
+  $('btn-save').disabled = !dirty && !draftAt;
   const st = $('save-status');
   st.className = `status ${cls || (dirty ? 'dirty' : '')}`;
   st.textContent = text || (dirty ? 'Unsaved changes' : (doc?.updatedAt ? `Saved ${new Date(doc.updatedAt).toLocaleString()}` : 'All changes saved'));
@@ -102,7 +109,7 @@ function renderPreviews() {
   document.documentElement.style.setProperty('--cyan', doc.settings.accent);
 }
 function renderDefaultTab() {
-  const opts = [['rooms', 'Open Wings'], ['howto', 'How to Play'], ['changelog', 'Changelog'], ...doc.sections.map((s) => [s.id, s.title])];
+  const opts = [['rooms', 'Open Wings'], ['howto', 'How to Play'], ['hangar', 'Hangar'], ['changelog', 'Changelog'], ...doc.sections.map((s) => [s.id, s.title])];
   $('default-tab').innerHTML = opts.map(([v, l]) => `<option value="${esc(v)}">${esc(l)}</option>`).join('');
   $('default-tab').value = doc.settings.defaultTab;
 }
@@ -256,14 +263,51 @@ $('pw-form').addEventListener('submit', async (e) => {
 
 // ----- save -----
 async function save() {
-  if (!isDirty()) return;
+  if (!isDirty()) {
+    if (!draftAt) return;
+    // nothing new to save: publish the stored draft as it is
+    try { doc = await api('POST', 'preview/publish'); draftAt = null; savedJson = JSON.stringify(doc); renderAll(); renderDraftBar(); toast('Draft published to everyone.'); window.dispatchEvent(new Event('vw-saved')); } catch (e) { updateStatus(`Publish failed: ${e.message}`, 'err'); }
+    return;
+  }
   updateStatus('Saving…');
   try {
     doc = await api('PUT', 'content', doc);
+    if (draftAt) { try { await api('DELETE', 'preview'); } catch {} draftAt = null; renderDraftBar(); }
     savedJson = JSON.stringify(doc);
-    renderAll(); toast('Saved: the site is updated.'); window.dispatchEvent(new Event('vw-saved'));
+    renderAll(); toast('Published: the site and game are updated.'); window.dispatchEvent(new Event('vw-saved'));
   } catch (e) { updateStatus(`Save failed: ${e.message}`, 'err'); }
 }
+// Save as a preview draft: only signed-in admins see it in the game (toggle on the main page).
+async function savePreview() {
+  updateStatus('Saving preview…');
+  try {
+    doc = await api('PUT', 'preview', doc);
+    draftAt = doc.updatedAt;
+    savedJson = JSON.stringify(doc);
+    renderAll(); renderDraftBar();
+    toast('Preview saved. Open the game and switch on "Fly with the draft" to try it.');
+    window.dispatchEvent(new Event('vw-saved'));
+  } catch (e) { updateStatus(`Preview save failed: ${e.message}`, 'err'); }
+}
+function renderDraftBar() {
+  const bar = $('draft-bar');
+  bar.classList.toggle('hidden', !draftAt);
+  if (draftAt) $('draft-when').textContent = new Date(draftAt).toLocaleString();
+  $('btn-save').textContent = draftAt ? 'Publish' : 'Save & publish';
+}
+$('btn-preview-save').onclick = savePreview;
+$('btn-draft-publish').onclick = async () => {
+  if (isDirty() && !confirm('Publish includes your unsaved edits too. Continue?')) return;
+  await save();
+};
+$('btn-draft-discard').onclick = async () => {
+  if (!confirm('Throw away the preview draft and go back to the live content? Unpublished changes are lost.')) return;
+  try { await api('DELETE', 'preview'); } catch {}
+  draftAt = null;
+  doc = await api('GET', 'content'); savedJson = JSON.stringify(doc);
+  renderAll(); renderDraftBar(); window.dispatchEvent(new Event('vw-saved'));
+  toast('Draft discarded.');
+};
 $('btn-save').onclick = save;
 document.addEventListener('keydown', (e) => { if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') { e.preventDefault(); save(); } });
 window.addEventListener('beforeunload', (e) => { if (isDirty()) { e.preventDefault(); e.returnValue = ''; } });

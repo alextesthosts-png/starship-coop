@@ -6,10 +6,17 @@ const cache = new Map();
 let maxAniso = 8;
 export function setAnisotropy(n) { maxAniso = Math.min(8, n || 1); }
 
+// Admin uploads (admin → Environments) can replace the terrain textures by name.
+let OVERRIDES = {};
+export function setTextureOverrides(map = {}) {
+  const changed = JSON.stringify(map) !== JSON.stringify(OVERRIDES);
+  OVERRIDES = { ...map };
+  if (changed) for (const k of [...cache.keys()]) if (/^terrain_/.test(k)) cache.delete(k);
+}
 export function tex(name, color = true, repeat = 1) {
   const key = name + color + repeat;
   if (cache.has(key)) return cache.get(key);
-  const t = loader.load(`/textures/${name}.jpg`);
+  const t = loader.load(OVERRIDES[name] || `/textures/${name}.jpg`);
   t.wrapS = t.wrapT = THREE.RepeatWrapping;
   t.colorSpace = color ? THREE.SRGBColorSpace : THREE.NoColorSpace;
   t.anisotropy = maxAniso;
@@ -80,8 +87,16 @@ export function terrainMaterial() {
         float rockW = (1.0 - cliffW) * clamp(smoothstep(0.10, 0.24, slope + (brk - 0.5) * 0.35) + smoothstep(420.0, 650.0, p.y), 0.0, 1.0);
         float sandW = max(0.0, 1.0 - cliffW - rockW);
         // two scales per layer to hide tiling
-        vec3 sand = mix(triA(tSandA, p, w, 0.045), triA(tSandA, p, w, 0.0105), 0.45);
         vec3 rock = mix(triA(tRockA, p, w, 0.022), triA(tRockA, p, w, 0.0051), 0.45);
+        // the larger sand sample is rotated so its pattern never lines up with the small one
+        vec3 pr = vec3(p.x * 0.799 - p.z * 0.602, p.y, p.x * 0.602 + p.z * 0.799);
+        vec3 sand = mix(triA(tSandA, p, w, 0.045), triA(tSandA, pr, w, 0.0083), 0.4);
+        // flat ground: large drifts and darker gravel patches so plains don't read as one flat colour
+        float drift = dot(texture2D(tCliffA, p.xz * 0.00021 + 0.37).rgb, vec3(0.333));
+        float gravel = smoothstep(0.5, 0.64, dot(texture2D(tRockA, p.xz * 0.0013 + 0.11).rgb, vec3(0.333)));
+        float drift2 = dot(texture2D(tRockA, pr.xz * 0.00062 + 0.71).rgb, vec3(0.333));
+        sand *= mix(0.7, 1.2, drift) * mix(0.88, 1.1, drift2);
+        sand = mix(sand, rock * 0.8, gravel * 0.6);
         // cliffs: strata follow height, slight wobble so bands aren't perfectly flat
         vec3 cliff = mix(triA(tCliffA, p, w, 0.012), triA(tCliffA, p + vec3(0.0, sin(p.x * 0.004) * 30.0, 0.0), w, 0.004), 0.5);
         vec3 alb = sand * sandW + rock * rockW + cliff * cliffW;
@@ -90,7 +105,7 @@ export function terrainMaterial() {
         // canyon floor darker, base plateau slightly paved
         alb *= mix(0.72, 1.0, smoothstep(-160.0, -40.0, p.y));
         diffuseColor.rgb *= alb;
-        gTerrN = triN(tSandN, p, w, 0.045, N) * sandW * 0.8 + triN(tRockN, p, w, 0.022, N) * rockW + triN(tCliffN, p, w, 0.012, N) * cliffW * 1.3;
+        gTerrN = (triN(tSandN, p, w, 0.045, N) * 0.4 + triN(tSandN, pr, w, 0.0083, N) * 0.3) * sandW + triN(tRockN, p, w, 0.022, N) * rockW + triN(tCliffN, p, w, 0.012, N) * cliffW * 1.3;
       `)
       .replace('#include <color_fragment>', '')
       .replace('#include <normal_fragment_maps>', `#include <normal_fragment_maps>

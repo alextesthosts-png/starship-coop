@@ -5,7 +5,8 @@ import crypto from 'node:crypto';
 import { DATA_DIR } from './content.js';
 
 const INDEX_FILE = path.join(DATA_DIR, 'media-index.json');
-export const LIMITS = { image: 10 * 1024 * 1024, model: 40 * 1024 * 1024 };
+export const LIMITS = { image: 10 * 1024 * 1024, model: 40 * 1024 * 1024, sound: 15 * 1024 * 1024 };
+const FOLDER = { image: 'images', model: 'models', sound: 'sounds' };
 const CACHE_MAX_BYTES = 64 * 1024 * 1024;   // in-memory cache for hot files (textures, models)
 const CACHE_MAX_FILE = 12 * 1024 * 1024;
 
@@ -42,12 +43,22 @@ export function status() {
 }
 
 // ---------------- validation ----------------
+function guessType(key) {
+  const ext = key.split('.').pop();
+  return { glb: 'model/gltf-binary', jpg: 'image/jpeg', png: 'image/png', gif: 'image/gif', webp: 'image/webp', mp3: 'audio/mpeg', ogg: 'audio/ogg', wav: 'audio/wav', m4a: 'audio/mp4' }[ext] || 'application/octet-stream';
+}
 function sniff(buf) {
   if (buf.length >= 8 && buf.readUInt32BE(0) === 0x89504e47) return { kind: 'image', type: 'image/png', ext: 'png' };
   if (buf.length >= 3 && buf[0] === 0xff && buf[1] === 0xd8 && buf[2] === 0xff) return { kind: 'image', type: 'image/jpeg', ext: 'jpg' };
   if (buf.length >= 6 && buf.toString('ascii', 0, 6).startsWith('GIF8')) return { kind: 'image', type: 'image/gif', ext: 'gif' };
   if (buf.length >= 12 && buf.toString('ascii', 0, 4) === 'RIFF' && buf.toString('ascii', 8, 12) === 'WEBP') return { kind: 'image', type: 'image/webp', ext: 'webp' };
   if (buf.length >= 12 && buf.toString('ascii', 0, 4) === 'glTF' && buf.readUInt32LE(4) === 2) return { kind: 'model', type: 'model/gltf-binary', ext: 'glb' };
+  // audio: MP3 (ID3 tag or MPEG frame sync), Ogg, WAV, M4A/AAC
+  if (buf.length >= 3 && buf.toString('ascii', 0, 3) === 'ID3') return { kind: 'sound', type: 'audio/mpeg', ext: 'mp3' };
+  if (buf.length >= 2 && buf[0] === 0xff && (buf[1] & 0xe0) === 0xe0 && (buf[1] & 0x06) !== 0) return { kind: 'sound', type: 'audio/mpeg', ext: 'mp3' };
+  if (buf.length >= 4 && buf.toString('ascii', 0, 4) === 'OggS') return { kind: 'sound', type: 'audio/ogg', ext: 'ogg' };
+  if (buf.length >= 12 && buf.toString('ascii', 0, 4) === 'RIFF' && buf.toString('ascii', 8, 12) === 'WAVE') return { kind: 'sound', type: 'audio/wav', ext: 'wav' };
+  if (buf.length >= 12 && buf.toString('ascii', 4, 8) === 'ftyp' && /^(M4A|mp4|isom|M4B)/.test(buf.toString('ascii', 8, 12))) return { kind: 'sound', type: 'audio/mp4', ext: 'm4a' };
   return null;
 }
 function imageSize(buf, type) {
@@ -103,8 +114,8 @@ export function inspectGlb(buf) {
       extensionsRequired: j.extensionsRequired || [],
     });
     if (report.extensionsRequired.some((e) => /draco|meshopt|KHR_texture_basisu/i.test(e))) report.errors.push(`Uses compression the game can't decode yet: ${report.extensionsRequired.join(', ')}. Re-export without Draco/Meshopt compression.`);
-    if (!engines.length) report.warnings.push('No engine markers: add empties named engine_* at the exhausts to get plumes.');
-    if (!guns.length) report.warnings.push('No gun markers (gun_*): cannons will fire from the default positions.');
+    if (!engines.length) report.warnings.push('No engine markers yet: place them with the Markers button (or add empties named engine_* in Blender). Until then the game puts one engine at the tail.');
+    if (!guns.length) report.warnings.push('No gun markers yet: place them with the Markers button, or cannons fire from the default gun positions.');
     if (tris > 150000) report.warnings.push(`${tris.toLocaleString()} triangles is heavy for a fighter (aim for under 50k).`);
     if (!hasUv && materials.length) report.warnings.push('Some meshes have no UV coordinates, so textures can\'t map onto them.');
     if (size && Math.max(...size) > 40) report.warnings.push(`The model is ${Math.max(...size)} units across. Ships are about 12–15, so check its scale.`);
@@ -131,7 +142,7 @@ export async function upload(buf, originalName, by) {
   let report = null;
   if (t.kind === 'model') { report = inspectGlb(buf); if (!report.ok) throw Object.assign(new Error(report.errors.join(' ')), { status: 422 }); }
   const id = crypto.randomBytes(6).toString('hex');
-  const key = `${t.kind === 'model' ? 'models' : 'images'}/${id}-${cleanName(originalName)}.${t.ext}`;
+  const key = `${FOLDER[t.kind]}/${id}-${cleanName(originalName)}.${t.ext}`;
   const etag = crypto.createHash('sha1').update(buf).digest('hex').slice(0, 16);
   const c = await client();
   await c.send(new S3.PutObjectCommand({
@@ -161,8 +172,8 @@ export async function resync() {
   do {
     const r = await c.send(new S3.ListObjectsV2Command({ Bucket: cfg.bucket, ContinuationToken: token, MaxKeys: 1000 }));
     for (const o of r.Contents || []) {
-      if (!/^(images|models)\//.test(o.Key)) continue;
-      fresh.push(known.get(o.Key) || { key: o.Key, url: `/media/${o.Key}`, name: o.Key.split('/').pop(), kind: o.Key.startsWith('models/') ? 'model' : 'image', type: o.Key.endsWith('.glb') ? 'model/gltf-binary' : 'image/' + (o.Key.split('.').pop() === 'jpg' ? 'jpeg' : o.Key.split('.').pop()), size: o.Size, uploadedAt: +new Date(o.LastModified), by: '?', report: null });
+      if (!/^(images|models|sounds)\//.test(o.Key)) continue;
+      fresh.push(known.get(o.Key) || { key: o.Key, url: `/media/${o.Key}`, name: o.Key.split('/').pop(), kind: o.Key.startsWith('models/') ? 'model' : o.Key.startsWith('sounds/') ? 'sound' : 'image', type: guessType(o.Key), size: o.Size, uploadedAt: +new Date(o.LastModified), by: '?', report: null });
     }
     token = r.IsTruncated ? r.NextContinuationToken : undefined;
   } while (token);
@@ -179,7 +190,7 @@ function cachePut(key, v) {
   for (const [k, old] of cache) { if (cacheBytes <= CACHE_MAX_BYTES) break; cache.delete(k); cacheBytes -= old.buf.length; }
 }
 export async function serve(req, res, key) {
-  if (!/^(images|models)\/[\w.-]+$/.test(key)) { res.writeHead(404); return res.end(); }
+  if (!/^(images|models|sounds)\/[\w.-]+$/.test(key)) { res.writeHead(404); return res.end(); }
   let hit = cache.get(key);
   if (hit) { cache.delete(key); cache.set(key, hit); }   // LRU touch
   else {

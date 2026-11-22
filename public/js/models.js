@@ -11,22 +11,74 @@ import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 //   *Hull -> textured hull panels, *Accent -> player colour, *Dark -> dark panels,
 //   *Canopy -> glass, *Glow -> engine glow, *Baked -> kept exactly as authored (own textures,
 //   no player colour). Empties named engine_* get an engine flare.
-const SHIP_FILES = { lancer: '/models/lancer.glb', warden: '/models/warden.glb' };
+const BUILTIN_FILES = { lancer: '/models/lancer.glb', warden: '/models/warden.glb' };
+const SHIP_FILES = { ...BUILTIN_FILES };
 // Models uploaded in the admin media library can replace the built-in one of any ship or structure
 // (see MODEL_SLOTS). Uploaded models are scaled to the built-in model's size and centred.
 const CUSTOM = new Set();
-export function setShipModels(overrides = {}) {
+const BASE_OF = {};   // custom ship id -> built-in ship it is derived from
+export function setShipModels(overrides = {}, customShips = []) {
+  for (const k of Object.keys(SHIP_FILES)) if (!BUILTIN_FILES[k]) delete SHIP_FILES[k];
+  Object.assign(SHIP_FILES, BUILTIN_FILES);
+  CUSTOM.clear();
   for (const [k, url] of Object.entries(overrides)) {
     if (!MODEL_SLOTS[k] || typeof url !== 'string' || !/^\/media\/models\/[\w.-]+$/.test(url)) continue;
     SHIP_FILES[k] = url; CUSTOM.add(k);
   }
+  for (const s of customShips) {
+    BASE_OF[s.id] = s.base;
+    if (s.model) { SHIP_FILES[s.id] = s.model; if (s.model.startsWith('/media/')) CUSTOM.add(s.id); }
+    else if (SHIP_FILES[s.base]) { SHIP_FILES[s.id] = SHIP_FILES[s.base]; if (CUSTOM.has(s.base)) CUSTOM.add(s.id); }
+  }
+}
+// Engine / gun / emblem markers placed in the admin's marker editor, per model file.
+let MARKERS = {};
+export function setModelMarkers(m) { MARKERS = m || {}; }
+// Liveries: paint schemes and emblems players can pick (see admin → Liveries).
+let LIVERIES = {};
+export function setLiveries(list = []) { LIVERIES = Object.fromEntries(list.map((l) => [l.id, l])); }
+export const liveryById = (id) => LIVERIES[id] || null;
+const texLoader = new THREE.TextureLoader();
+const emblemTex = new Map();
+function emblemTexture(url) {
+  if (!emblemTex.has(url)) { const t = texLoader.load(url); t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = 4; emblemTex.set(url, t); }
+  return emblemTex.get(url);
+}
+// A flat decal hugging the hull at p, facing along n.
+function emblemDecal(url, p, n, size) {
+  const m = new THREE.MeshStandardMaterial({ map: emblemTexture(url), transparent: true, alphaTest: 0.04, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -4, roughness: 0.55, metalness: 0.2 });
+  const d = new THREE.Mesh(new THREE.PlaneGeometry(size, size), m);
+  const nn = new THREE.Vector3(...n).normalize();
+  d.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), nn);
+  // keep the emblem upright relative to the ship's nose where possible
+  d.position.set(...p).addScaledVector(nn, size * 0.01);
+  d.renderOrder = 2;
+  d.userData.decal = true;
+  return d;
+}
+// Put the emblem on the top of the hull when the model has no emblem marker: cast a ray down
+// a little behind the middle of the ship and stick the decal where it lands.
+function autoEmblem(g, url, scaleMul = 1) {
+  g.updateMatrixWorld(true);
+  const box = new THREE.Box3().setFromObject(g);
+  const size = box.getSize(new THREE.Vector3());
+  const meshes = []; g.traverse((o) => { if (o.isMesh && !o.userData.decal && !(o.material?.blending === THREE.AdditiveBlending)) meshes.push(o); });
+  const rc = new THREE.Raycaster(new THREE.Vector3(box.getCenter(new THREE.Vector3()).x, box.max.y + 5, box.min.z + size.z * 0.6), new THREE.Vector3(0, -1, 0));
+  const hit = rc.intersectObjects(meshes, false)[0];
+  if (!hit) return;
+  const n = hit.face ? hit.face.normal.clone().transformDirection(hit.object.matrixWorld) : new THREE.Vector3(0, 1, 0);
+  if (n.y < 0.3) n.set(0, 1, 0);
+  const inv = new THREE.Matrix4().copy(g.matrixWorld).invert();
+  const p = hit.point.clone().applyMatrix4(inv);
+  g.add(emblemDecal(url, p.toArray(), n.toArray(), Math.min(size.x, size.z) * 0.28 * scaleMul));
 }
 // Longest side of each built-in model, in metres. Lancer/Warden are their Blender models; the
 // rest are measured from the procedural builders the first time they're needed.
 const REF_SIZE = { lancer: 14, warden: 12 };
 const REF_CENTER = { lancer: new THREE.Vector3(), warden: new THREE.Vector3() };
 function measureBuiltin(type) {
-  const g = type === 'dreadnought' ? buildDreadnought(true) : ['lancer', 'warden', 'hammer'].includes(type) ? buildShip(type, '#ffffff', true) : buildEntity(type, true);
+  if (BASE_OF[type]) { REF_SIZE[type] = refSize(BASE_OF[type]); REF_CENTER[type] = refCenter(BASE_OF[type]); return; }
+  const g = type === 'dreadnought' ? buildDreadnought(true) : ['lancer', 'warden', 'hammer'].includes(type) ? buildShip(type, '#ffffff', { builtin: true }) : buildEntity(type, true);
   const box = new THREE.Box3().setFromObject(g);
   const s = box.getSize(new THREE.Vector3());
   REF_SIZE[type] = Math.max(s.x, s.y, s.z) || 10;
@@ -40,19 +92,36 @@ const ENV_INTENSITY = { lancer: 1.0, warden: 0.28 };
 // Studio reflections for *Baked materials, so metals look like Blender's material preview
 let bakedEnv = null;
 export function setBakedEnvironment(tex) { bakedEnv = tex; }
-const shipModels = {};
-let preloadPromise = null;
+const shipModels = {};          // slot -> loaded scene
+const sceneByUrl = new Map();   // url -> Promise<scene|null>
+const gltfLoader = new GLTFLoader();
 export function preloadShipModels() {
-  if (preloadPromise) return preloadPromise;
-  const loader = new GLTFLoader();
-  preloadPromise = Promise.all(Object.entries(SHIP_FILES).map(([k, url]) =>
-    loader.loadAsync(url).then((g) => { shipModels[k] = g.scene; }).catch((e) => console.warn('ship model failed', k, e))));
-  return preloadPromise;
+  const jobs = Object.entries(SHIP_FILES).map(([k, url]) => {
+    if (!sceneByUrl.has(url)) sceneByUrl.set(url, gltfLoader.loadAsync(url).then((g) => g.scene).catch((e) => { console.warn('model failed', url, e); return null; }));
+    return sceneByUrl.get(url).then((sc) => { if (sc) shipModels[k] = sc; else delete shipModels[k]; });
+  });
+  for (const k of Object.keys(shipModels)) if (!SHIP_FILES[k]) delete shipModels[k];
+  return Promise.all(jobs);
 }
-function buildShipFromModel(type, color, { enemy = false, plumes = true, fallbackEngine = true } = {}) {
+const shipModelFor = (type) => (SHIP_FILES[type] && sceneByUrl.has(SHIP_FILES[type]) ? shipModels[type] : null);
+function buildShipFromModel(type, color, { enemy = false, plumes = true, fallbackEngine = true, livery = null } = {}) {
+  const url = SHIP_FILES[type];
   const src = shipModels[type];
   let g = src.clone(true);
-  let scale = 1;
+  let inner = g, scale = 1;
+  // far-detail version (LOD1_* node, made by the admin's model optimizer): swap by distance
+  const lod1 = g.getObjectByName('LOD1') || g.children.find((c) => /^LOD1/i.test(c.name));
+  const lod0 = g.getObjectByName('LOD0') || g.children.find((c) => /^LOD0/i.test(c.name));
+  if (lod1 && lod0 && lod1.parent === lod0.parent) {
+    const parent = lod0.parent;
+    const lod = new THREE.LOD();
+    lod.position.copy(lod0.position); lod.quaternion.copy(lod0.quaternion); lod.scale.copy(lod0.scale);
+    lod0.position.set(0, 0, 0); lod0.quaternion.identity(); lod0.scale.set(1, 1, 1);
+    lod1.position.set(0, 0, 0); lod1.quaternion.identity(); lod1.scale.set(1, 1, 1);
+    parent.add(lod);
+    lod.addLevel(lod0, 0);
+    lod.addLevel(lod1, refSize(type) * 22);
+  }
   if (CUSTOM.has(type)) {
     // fit an uploaded model to the built-in size, centred on the origin
     const box = new THREE.Box3().setFromObject(g);
@@ -61,17 +130,20 @@ function buildShipFromModel(type, color, { enemy = false, plumes = true, fallbac
     g.scale.setScalar(scale);
     g.position.copy(c).multiplyScalar(-scale);
     // ships stay centred on their pivot; structures sit where the built-in one did
-    if (!['lancer', 'warden', 'hammer', 'wing', 'raider', 'bomber'].includes(type)) g.position.add(refCenter(type));
+    if (!(['lancer', 'warden', 'hammer', 'wing', 'raider', 'bomber'].includes(type) || BASE_OF[type])) g.position.add(refCenter(type));
     const wrap = new THREE.Group(); wrap.add(g);
     wrap.userData.halfSize = size.clone().multiplyScalar(scale / 2);
+    inner = g;
     g = wrap;
   }
   const engines = [];
-  const accent = panelMaterial(color, { metalness: 0.4, roughness: 0.4 });
-  const hullM = panelMaterial(0xd6dbe2, { metalness: 0.5, roughness: 0.45 });
-  const darkM = panelMaterial(0x50565f, { metalness: 0.6, roughness: 0.5, repeat: 2 });
+  const L = livery;
+  const accent = panelMaterial(L?.accent || color, { metalness: 0.4, roughness: 0.4 });
+  const hullM = panelMaterial(L?.hull || 0xd6dbe2, { metalness: 0.5, roughness: 0.45 });
+  const darkM = panelMaterial(L?.dark || 0x50565f, { metalness: 0.6, roughness: 0.5, repeat: 2 });
   const canopy = mat(0x10243a, { emissive: 0x2a7fff, ei: 0.35, metal: 0.9, rough: 0.15 });
   const glowM = glow(color, 2.2);
+  const mk = MARKERS[url];
   const empties = [];
   g.traverse((o) => {
     if (o.isMesh) {
@@ -80,15 +152,25 @@ function buildShipFromModel(type, color, { enemy = false, plumes = true, fallbac
         // uploaded enemy/structure models keep their own materials unless they use the naming scheme
         if (enemy && !/(Hull|Accent|Dark|Canopy|Glow)$/.test(n)) return m;
         if (n.endsWith('Baked')) {
-          if (bakedEnv && !m.envMap) { m.envMap = bakedEnv; m.envMapIntensity = ENV_INTENSITY[type] ?? 0.5; m.needsUpdate = true; }
+          if (bakedEnv && !m.envMap) { m.envMap = bakedEnv; m.envMapIntensity = ENV_INTENSITY[type] ?? ENV_INTENSITY[BASE_OF[type]] ?? 0.5; m.needsUpdate = true; }
           return m;
         }
         return n.endsWith('Accent') ? accent : n.endsWith('Dark') ? darkM : n.endsWith('Canopy') ? canopy : n.endsWith('Glow') ? glowM : hullM;
       };
       o.material = Array.isArray(o.material) ? o.material.map(pick) : pick(o.material);
-    } else if (/^engine/i.test(o.name)) empties.push(o);
+    } else if (!mk?.engines?.length && /^engine/i.test(o.name)) empties.push(o);
     else if (/^spin/i.test(o.name) && !g.userData.spin) g.userData.spin = o;   // optional rotating part
   });
+  // markers from the admin's marker editor replace the ones in the file (model coordinates)
+  if (mk?.engines?.length) {
+    for (const e of mk.engines) {
+      const o = new THREE.Object3D(); o.position.set(...e.p);
+      if (e.r) o.userData.plumeRadius = e.r;
+      if (e.color) o.userData.plumeColor = e.color;
+      inner.add(o); empties.push(o);
+    }
+  }
+  if (mk?.guns?.length) g.userData.guns = mk.guns.map((p) => new THREE.Vector3(...p).multiplyScalar(scale).add(inner === g ? new THREE.Vector3() : inner.position).toArray());
   // A model with no engine markers gets one engine at the middle of its tail.
   if (!empties.length && fallbackEngine && g.userData.halfSize) {
     const e = new THREE.Object3D(); g.add(e); empties.push(e);
@@ -96,19 +178,25 @@ function buildShipFromModel(type, color, { enemy = false, plumes = true, fallbac
     e.userData.fallback = true;
   }
   const exhausts = [];
-  const plumeCol = enemy ? 0xff5a22 : (VISUALS.plume[type] || color);
+  const plumeCol = enemy ? 0xff5a22 : (VISUALS.plume[type] || VISUALS.plume[BASE_OF[type]] || color);
   for (const e of empties) {
     // plume sizes are in game metres: undo the fit scale for markers inside the scaled model
-    const inner = e.userData.fallback ? 1 : scale;
-    const r = e.userData.plumeRadius ? e.userData.plumeRadius : (PLUME_RADIUS[type] || refSize(type) * 0.045) / inner;
+    const inScaled = !e.userData.fallback && e.parent !== g;
+    const r = e.userData.plumeRadius ? e.userData.plumeRadius : (PLUME_RADIUS[type] || PLUME_RADIUS[BASE_OF[type]] || refSize(type) * 0.045) / (inScaled ? scale : 1);
+    const col = e.userData.plumeColor || plumeCol;
     if (plumes) {
-      const ex = buildExhaust(plumeCol, r);
+      const ex = buildExhaust(col, r);
       e.add(ex);
       exhausts.push(ex);
     }
-    const eg = engineGlow(plumeCol, r * (plumes ? 1.1 : 4));   // small nozzle flare only
+    const eg = engineGlow(col, r * (plumes ? 1.1 : 4));   // small nozzle flare only
     e.add(eg);
     engines.push(eg);
+  }
+  // livery emblem: at the marker spots, or on top of the hull
+  if (L?.emblem) {
+    if (mk?.emblems?.length) for (const em of mk.emblems) inner.add(emblemDecal(L.emblem, em.p, em.n, em.size * (L.emblemSize || 1)));
+    else autoEmblem(g, L.emblem, L.emblemSize || 1);
   }
   g.userData.engines = engines;
   if (plumes) g.userData.exhausts = exhausts;
@@ -216,12 +304,25 @@ export function buildExhaust(color, radius = 0.6) {
 }
 
 // ---------------- player ships ----------------
-export function buildShip(type, color, builtin = false) {
-  if (!builtin && shipModels[type]) return buildShipFromModel(type, color);
+export function buildShip(type, color, opts = {}) {
+  if (typeof opts === 'boolean') opts = { builtin: opts };
+  const { builtin = false, livery = null } = opts;
+  const L = typeof livery === 'string' ? liveryById(livery) : livery;
+  if (!builtin && shipModelFor(type)) return buildShipFromModel(type, color, { livery: L });
+  if (BASE_OF[type]) {
+    // custom ship without its own model: the base ship's look
+    const g = buildShip(BASE_OF[type], color, { livery: L });
+    return g;
+  }
+  const g = buildShipProcedural(type, color, L);
+  if (L?.emblem && !builtin) autoEmblem(g, L.emblem, L.emblemSize || 1);
+  return g;
+}
+function buildShipProcedural(type, color, L = null) {
   const g = new THREE.Group();
-  const accent = panelMaterial(color, { metalness: 0.4, roughness: 0.4 });
-  const hullM = panelMaterial(0xd6dbe2, { metalness: 0.5, roughness: 0.45 });
-  const darkM = panelMaterial(0x50565f, { metalness: 0.6, roughness: 0.5, repeat: 2 });
+  const accent = panelMaterial(L?.accent || color, { metalness: 0.4, roughness: 0.4 });
+  const hullM = panelMaterial(L?.hull || 0xd6dbe2, { metalness: 0.5, roughness: 0.45 });
+  const darkM = panelMaterial(L?.dark || 0x50565f, { metalness: 0.6, roughness: 0.5, repeat: 2 });
   const canopy = mat(0x10243a, { emissive: 0x2a7fff, ei: 0.35, metal: 0.9, rough: 0.15 });
   const engines = [];
   if (type === 'lancer') {
@@ -273,7 +374,7 @@ export function buildShip(type, color, builtin = false) {
 // ---------------- enemies & structures ----------------
 const ENEMY_RED = 0xd8322f;
 export function buildEntity(type, builtin = false) {
-  if (!builtin && shipModels[type] && CUSTOM.has(type)) return buildEntityFromModel(type);
+  if (!builtin && shipModelFor(type) && CUSTOM.has(type)) return buildEntityFromModel(type);
   const g = new THREE.Group();
   const engines = [];
   const dark = panelMaterial(0x6a5c62, { metalness: 0.6, roughness: 0.45 });
@@ -369,7 +470,7 @@ function buildEntityFromModel(type) {
 
 // ---------------- capital ship ----------------
 export function buildDreadnought(builtin = false) {
-  if (!builtin && shipModels.dreadnought && CUSTOM.has('dreadnought')) return buildShipFromModel('dreadnought', '#d8322f', { enemy: true, plumes: false, fallbackEngine: false });
+  if (!builtin && shipModelFor('dreadnought') && CUSTOM.has('dreadnought')) return buildShipFromModel('dreadnought', '#d8322f', { enemy: true, plumes: false, fallbackEngine: false });
   const g = new THREE.Group();
   const hullM = triplanarMaterial({ albedo: 'hull_panels_albedo', normal: 'hull_panels_normal', scale: 0.018, color: 0xb0b4bc, metalness: 0.5, roughness: 0.55, normalStrength: 1.2 });
   const darkM = triplanarMaterial({ albedo: 'hull_panels_albedo', normal: 'hull_panels_normal', scale: 0.07, color: 0x6a6e76, metalness: 0.6, roughness: 0.6 });

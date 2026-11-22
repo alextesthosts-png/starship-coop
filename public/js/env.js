@@ -1,5 +1,18 @@
 // Environment builders: planet surface and deep space.
 import { VISUALS } from '/shared/tuning.js';
+// Admin uploads (admin → Environments): a panorama backdrop per space mission.
+let PANORAMAS = {};
+export function setPanoramas(map) { PANORAMAS = map || {}; }
+const panoCache = new Map();
+function panorama(url) {
+  if (!panoCache.has(url)) {
+    const t = new THREE.TextureLoader().load(url);
+    t.mapping = THREE.EquirectangularReflectionMapping;
+    t.colorSpace = THREE.SRGBColorSpace;
+    panoCache.set(url, t);
+  }
+  return panoCache.get(url);
+}
 import * as THREE from 'three';
 import { PLANET, terrainHeight, TOWERS, asteroids, CONVOY, DREAD, insideBox, mulberry32 } from '/shared/world.js';
 import { mat, buildDreadnought, buildJumpGate } from './models.js';
@@ -85,7 +98,8 @@ function bandedPlanet(radius, c1, c2, c3, atmo) {
   return me;
 }
 
-export function buildPlanetEnv(scene) {
+export function buildPlanetEnv(scene, mission = null) {
+  const towers = mission?.towers || TOWERS;
   const sunDir = new THREE.Vector3(-0.5, 0.35, -0.8).normalize();
   const P = VISUALS.planet;
   scene.add(skyDome(P.skyTop, P.skyHorizon, sunDir, 0xffd9a0));
@@ -166,7 +180,7 @@ export function buildPlanetEnv(scene) {
     collide(pos) {
       const h = terrainHeight(pos.x, pos.z);
       if (pos.y < h + 2.5) return { normal: new THREE.Vector3(0, 1, 0), push: h + 2.5 - pos.y };
-      for (const [x, z] of TOWERS) {
+      for (const [x, z] of towers) {
         const th = terrainHeight(x, z);
         if (Math.hypot(pos.x - x, pos.z - z) < 11 && pos.y < th + 100) {
           const n = new THREE.Vector3(pos.x - x, 0, pos.z - z).normalize();
@@ -180,11 +194,17 @@ export function buildPlanetEnv(scene) {
   };
 }
 
-export function buildSpaceEnv(scene, missionId) {
-  const isConvoy = missionId === 'convoy';
+export function buildSpaceEnv(scene, mission) {
+  const id = typeof mission === 'string' ? mission : mission?.id;
+  // convoy / dread are the built-in scenes; custom missions are open space or an asteroid belt
+  const kind = id === 'convoy' ? 'convoy' : id === 'dread' ? 'dread' : mission?.space === 'asteroids' ? 'asteroids' : 'open';
+  const isConvoy = kind === 'convoy' || kind === 'asteroids';
   const SP = VISUALS.space;
-  scene.add(nebulaSphere(isConvoy ? SP.convoyA : SP.dreadA, isConvoy ? SP.convoyB : SP.dreadB, isConvoy ? 1.7 : 4.2));
-  scene.add(starfield());
+  if (PANORAMAS[id]) scene.background = panorama(PANORAMAS[id]);
+  else {
+    scene.add(nebulaSphere(isConvoy || kind === 'open' ? SP.convoyA : SP.dreadA, isConvoy || kind === 'open' ? SP.convoyB : SP.dreadB, kind === 'dread' ? 4.2 : 1.7));
+    scene.add(starfield());
+  }
   scene.fog = null;
   scene.add(new THREE.AmbientLight(0x404a60, 0.9));
   scene.add(new THREE.HemisphereLight(0x8090c0, 0x302020, 0.6));
@@ -225,11 +245,13 @@ export function buildSpaceEnv(scene, missionId) {
       });
       scene.add(im);
     }
-    const gate = buildJumpGate();
-    gate.position.set(...CONVOY.gate);
-    gate.position.z += 120;
-    scene.add(gate);
-    updaters.push((t) => { gate.userData.disc.material.opacity = 0.14 + Math.sin(t * 3) * 0.05; });
+    if (kind === 'convoy') {
+      const gate = buildJumpGate();
+      gate.position.set(...CONVOY.gate);
+      gate.position.z += 120;
+      scene.add(gate);
+      updaters.push((t) => { gate.userData.disc.material.opacity = 0.14 + Math.sin(t * 3) * 0.05; });
+    }
     colliders.push((pos) => {
       for (const a of list) {
         const dx = pos.x - a.x, dy = pos.y - a.y, dz = pos.z - a.z;
@@ -242,6 +264,10 @@ export function buildSpaceEnv(scene, missionId) {
       }
       return null;
     });
+  } else if (kind === 'open') {
+    const gp = bandedPlanet(4200, 0x7090b0, 0x405070, 0xc0d8f0, 0x88bbff);
+    gp.position.set(7000, -2500, -9000);
+    scene.add(gp);
   } else {
     const moon = bandedPlanet(3800, 0x8a8a90, 0x6a6a70, 0xa0a0a8, 0x8899ff);
     moon.position.set(2000, -6500, -6000);

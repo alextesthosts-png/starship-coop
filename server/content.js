@@ -5,12 +5,14 @@ import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { sanitizeTuning } from '../shared/tuning.js';
 import { MODEL_SLOTS } from '../shared/config.js';
+import * as G from '../shared/gamecontent.js';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 export const DATA_DIR = process.env.DATA_DIR || (fs.existsSync('/data') ? '/data' : path.join(ROOT, 'data'));
 const CONTENT_FILE = path.join(DATA_DIR, 'content.json');
 const ADMIN_FILE = path.join(DATA_DIR, 'admin.json');
 const REV_DIR = path.join(DATA_DIR, 'revisions');
+const PREVIEW_FILE = path.join(DATA_DIR, 'preview.json');
 const MAX_REVISIONS = 30;
 fs.mkdirSync(REV_DIR, { recursive: true });
 
@@ -41,7 +43,19 @@ export const DEFAULT_CONTENT = {
   },
   sections: [],
   changelog: [
-    { id: 'v1-9', version: 'v1.9', date: '21 Nov 2026', title: '', latest: true, items: [
+    { id: 'v2-0', version: 'v2.0', date: '22 Nov 2026', title: 'The studio update', latest: true, items: [
+      '**Mission editor:** build new missions on a map (start point, relay towers, turrets, enemy waves, a convoy route), with time limits, bonus goals and radio lines. They show up in the lobby, or only during an event.',
+      '**New playable ships** made in the admin panel: name, model, flight and weapon numbers, secondary weapon, and which missions they are cleared for.',
+      '**Liveries and squadron emblems:** paint schemes under the ship select. Some are locked to forum ranks: sign in with your forum account to unlock yours.',
+      '**Marker editor:** place engines, guns and emblem spots on any 3D model by clicking on it. **Model optimizer:** cut triangle counts in the browser and add a far-detail version for distance.',
+      '**Environments:** panorama backdrops for space missions, custom planet textures, and heightmaps that reshape Kessa Prime.',
+      '**Sounds and music** can be uploaded and assigned per effect and per mission.',
+      '**Scheduled events** switch double score, liveries and limited missions on and off by themselves.',
+      '**Preview mode:** admins fly the next update in private before it goes live.',
+      '**Hangar** tab on the main page: every ship and enemy in 3D, with live stats.',
+      'Fixed: flat sand on Kessa Prime looked untextured. New sand texture with ripples, pebbles and large drifts.',
+    ] },
+    { id: 'v1-9', version: 'v1.9', date: '21 Nov 2026', title: '', latest: false, items: [
       '**Every model is swappable:** besides the three player ships, admins can now replace the AI wingmates, relay towers, raiders, pirate bombers, gunships, freighters, turrets, shield generators, reactor core and the Ravager itself.',
       'Uploaded models are scaled and centred to the size of the model they replace, so hitboxes and guns still line up, and get an engine glow at the tail if they have no engine markers.',
       '**OBJ models:** drop a .zip (or an .obj with its .mtl and textures) in the media library. The admin panel converts it to GLB in your browser, with a preview, orientation controls and texture size options.',
@@ -126,10 +140,10 @@ export function normalize(input) {
   const sections = (Array.isArray(input?.sections) ? input.sections : []).slice(0, 12).map((x, i) => ({
     id: slug(x?.id, i), title: str(x?.title, 40, 'Section') || 'Section', body: str(x?.body, 10000), visible: bool(x?.visible, true),
   }));
-  const tabIds = ['rooms', 'howto', 'changelog', ...sections.map((x) => x.id)];
+  const tabIds = ['rooms', 'howto', 'hangar', 'changelog', ...sections.map((x) => x.id)];
   const settings = {
     accent: typeof st.accent === 'string' && /^#[0-9a-fA-F]{6}$/.test(st.accent) ? st.accent.toLowerCase() : d.settings.accent,
-    showOpenWings: bool(st.showOpenWings, true), showHowTo: bool(st.showHowTo, true), showChangelog: bool(st.showChangelog, true),
+    showOpenWings: bool(st.showOpenWings, true), showHowTo: bool(st.showHowTo, true), showChangelog: bool(st.showChangelog, true), showHangar: bool(st.showHangar, true),
     defaultTab: tabIds.includes(st.defaultTab) ? st.defaultTab : 'rooms',
     background: mediaUrl(st.background, 'images'),
     backgroundDim: typeof st.backgroundDim === 'number' || typeof st.backgroundDim === 'string' ? Math.min(0.9, Math.max(0, +st.backgroundDim || 0)) : 0.55,
@@ -143,7 +157,16 @@ export function normalize(input) {
   }));
   const knownReleases = (Array.isArray(input?.knownReleases) ? input.knownReleases : []).filter((x) => typeof x === 'string').slice(0, 500);
   const tuning = sanitizeTuning(input?.tuning);
-  return { site, announcement, settings, sections, changelog, tuning, knownReleases, updatedAt: input?.updatedAt || null, updatedBy: input?.updatedBy || null };
+  const game = {
+    modelMarkers: G.sanitizeMarkers(input?.modelMarkers),
+    customShips: G.sanitizeCustomShips(input?.customShips),
+    liveries: G.sanitizeLiveries(input?.liveries),
+    environment: G.sanitizeEnvironment(input?.environment),
+    sounds: G.sanitizeSounds(input?.sounds),
+    customMissions: G.sanitizeMissions(input?.customMissions),
+    events: G.sanitizeEvents(input?.events),
+  };
+  return { site, announcement, settings, sections, changelog, tuning, ...game, knownReleases, updatedAt: input?.updatedAt || null, updatedBy: input?.updatedBy || null };
 }
 
 // ---------------- load / save ----------------
@@ -265,3 +288,30 @@ export function loginAllowed(ip) {
 }
 export function recordFailure(ip) { (attempts.get(ip) || attempts.set(ip, []).get(ip)).push(Date.now()); }
 export function clearFailures(ip) { attempts.delete(ip); }
+
+// ---------------- preview drafts ----------------
+// A second copy of the content that only signed-in admins see, so changes can be tried in the
+// game before everyone gets them. Publishing turns the draft into the live content.
+let preview;
+export function getPreview() {
+  if (preview !== undefined) return preview;
+  try { preview = normalize(JSON.parse(fs.readFileSync(PREVIEW_FILE, 'utf8'))); } catch { preview = null; }
+  return preview;
+}
+export function savePreview(input, by) {
+  const next = normalize(input);
+  next.knownReleases = getContent().knownReleases;
+  next.updatedAt = new Date().toISOString();
+  next.updatedBy = by;
+  writeAtomic(PREVIEW_FILE, JSON.stringify(next, null, 1));
+  preview = next;
+  return next;
+}
+export function discardPreview() { fs.rmSync(PREVIEW_FILE, { force: true }); preview = null; }
+export function publishPreview(by) {
+  const p = getPreview();
+  if (!p) throw new Error('There is no preview draft to publish.');
+  const live = saveContent(p, by);
+  discardPreview();
+  return live;
+}

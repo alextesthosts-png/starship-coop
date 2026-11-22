@@ -44,14 +44,35 @@ export function canyonZ(x) {
   return 900 + 480 * Math.sin(x * 0.0011) + 240 * Math.sin(x * 0.0027 + 1.3);
 }
 
+// An admin-uploaded heightmap (grey image, n×n bytes) can replace the terrain's shape.
+// It covers the whole planet surface; bright = high. The arena walls stay so the map stays closed.
+let HM = null;
+export function setTerrainOverride(grid) { HM = grid && grid.bytes?.length === grid.n * grid.n ? grid : null; }
+export const hasTerrainOverride = () => !!HM;
+function heightmapSample(x, z) {
+  const n = HM.n, half = PLANET.size / 2;
+  const fx = Math.min(n - 1.001, Math.max(0, ((x + half) / PLANET.size) * (n - 1)));
+  const fz = Math.min(n - 1.001, Math.max(0, ((z + half) / PLANET.size) * (n - 1)));
+  const ix = Math.floor(fx), iz = Math.floor(fz), tx = fx - ix, tz = fz - iz, b = HM.bytes;
+  const a = b[iz * n + ix], c = b[iz * n + ix + 1], d = b[(iz + 1) * n + ix], e = b[(iz + 1) * n + ix + 1];
+  const v = (a + (c - a) * tx) + ((d + (e - d) * tx) - (a + (c - a) * tx)) * tz;
+  // small noise on top so flat areas of a low-resolution map don't look like plastic
+  return (v / 255) * HM.height - HM.height * 0.3 + (fbm(x * 0.004, z * 0.004, 3) - 0.5) * 18;
+}
+
 export function terrainHeight(x, z) {
   const r = Math.hypot(x, z);
-  let h = fbm(x * 0.0009 + 10, z * 0.0009 - 7, 5) * 300 - 90;
-  const m = 1 - Math.abs(vnoise(x * 0.0017 + 3, z * 0.0017 + 9) * 2 - 1);
-  h += Math.pow(m, 5) * 260; // mesas / ridges
-  // meandering canyon south of the base
-  const d = Math.abs(z - canyonZ(x));
-  h -= (1 - smooth(50, 240, d)) * 210;
+  let h;
+  if (HM) h = heightmapSample(x, z);
+  else {
+    h = fbm(x * 0.0009 + 10, z * 0.0009 - 7, 5) * 300 - 90;
+    const m = 1 - Math.abs(vnoise(x * 0.0017 + 3, z * 0.0017 + 9) * 2 - 1);
+    h += Math.pow(m, 5) * 260; // mesas / ridges
+    // meandering canyon south of the base
+    const d = Math.abs(z - canyonZ(x));
+    h -= (1 - smooth(50, 240, d)) * 210;
+  }
+  if (HM && !HM.keepBase) return h + smooth(2700, 4300, r) * 1100 * (0.55 + 0.45 * vnoise(x * 0.002, z * 0.002));
   // flat plateau for the relay station
   const base = 1 - smooth(520, 900, r);
   h = h * (1 - base) + PLANET.baseHeight * base;

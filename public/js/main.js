@@ -1,15 +1,17 @@
 // App shell: networking, menus, lobby, debrief, and the menu backdrop scene.
 import * as THREE from 'three';
 import { SHIPS, MISSIONS, DIFFICULTY } from '/shared/config.js';
-import { buildShip, preloadShipModels, setBakedEnvironment, setShipModels } from './models.js';
+import { buildShip, preloadShipModels, setBakedEnvironment, setShipModels, setModelMarkers, setLiveries } from './models.js';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import { render as renderMarkup, inline as inlineMarkup, escapeHtml } from '/shared/markup.js';
 import { Sfx } from './audio.js';
 import { Hud, esc } from './hud.js';
 import { Input } from './input.js';
 import { Game } from './game.js';
-import { setAnisotropy } from './textures.js';
-import { applyTuning } from '/shared/tuning.js';
+import { setAnisotropy, setTextureOverrides } from './textures.js';
+import { setPanoramas } from './env.js';
+import { applyGameContent, shipAllowedIn, roleRank, ROLE_LABEL } from '/shared/gamecontent.js';
+import { showHangar, refreshHangar, renderList as renderHangarList } from './hangar.js';
 
 const $ = (id) => document.getElementById(id);
 const show = (id, on = true) => $(id).classList.toggle('hidden', !on);
@@ -23,7 +25,18 @@ const S = {
   game: null,
   screen: 'menu',
   pendingJoin: new URLSearchParams(location.search).get('room'),
+  livery: localStorage.getItem('vw_livery') || '',
+  pilot: localStorage.getItem('vw_pilot') || '',
+  preview: sessionStorage.getItem('vw_preview') === '1',
+  me: null,
+  content: null,
 };
+// Pilot pass from the forum ("Sign in with your forum account" sends players back with #pilot=...)
+{
+  const m = location.hash.match(/^#pilot=([\w.-]+)$/);
+  if (m) { S.pilot = m[1]; localStorage.setItem('vw_pilot', S.pilot); history.replaceState(null, '', location.pathname + location.search); }
+}
+const hello = () => net.send({ t: 'hello', name: S.name || `Pilot-${S.myId}`, ship: S.ship, livery: S.livery, pilot: S.pilot });
 if (!SHIPS[S.ship]) S.ship = 'lancer';
 S.flags = { missions: { siege: true, convoy: true, dread: true }, ships: { lancer: true, warden: true, hammer: true }, doubleScore: false, extraReserves: false, aiWingmates: true };
 let resolveContent; const contentReady = new Promise((r) => { resolveContent = r; });
@@ -69,12 +82,16 @@ function onMessage(m) {
     case 'welcome':
       S.myId = m.id;
       if (m.flags) applyFlags(m.flags);
-      net.send({ t: 'hello', name: S.name || `Pilot-${m.id}`, ship: S.ship });
+      hello();
       if (S.pendingJoin) { net.send({ t: 'join', code: S.pendingJoin }); S.pendingJoin = null; }
       break;
     case 'room': {
       const prevState = S.room?.state;
       S.room = m;
+      { // the server decides which livery I fly in this wing (role, events, preview draft)
+        const mine = m.players.find((q) => q.id === S.myId);
+        if (mine && S.me && S.me.livery !== mine.livery) { S.me.livery = mine.livery; renderLiveries(); setPreview(S.ship); }
+      }
       history.replaceState(null, '', `?room=${m.code}`);
       if (!S.game && S.screen !== 'debrief' && S.screen !== 'game') setScreen('lobby');
       renderLobby();
@@ -85,7 +102,14 @@ function onMessage(m) {
     case 'error': $('menu-error').textContent = m.msg; toast(m.msg); break;
     case 'chat': addChat(m); break;
     case 'flags': applyFlags(m.flags, true); break;
-    case 'tuning': applyGameTuning(m.tuning, true); break;
+    case 'tuning': break;
+    case 'content': if (m.scope !== 'preview' || S.preview) loadContent(true); break;
+    case 'me':
+      S.me = m;
+      if (m.pilot) { $('name').value = m.name; S.name = m.name; }
+      else if (S.pilot && !m.pilot) { S.pilot = ''; localStorage.removeItem('vw_pilot'); }   // expired or invalid pass
+      renderPilot(); renderLiveries(); setPreview(S.ship);
+      break;
     case 'start': startGame(m); break;
     case 'pjoin': S.game && S.game.onPlayerJoin(m.player); break;
     case 's': if (S.game) { S.game.onSnapshot(m); if (m.ev) S.game.onEvents(m.ev); } break;
@@ -116,15 +140,20 @@ function toast(text) {
 // ---------------- ship select ----------------
 function pips(n) { return `<div class="pips">${Array.from({ length: 5 }, (_, i) => `<i class="${i < n ? 'on' : ''}"></i>`).join('')}</div>`; }
 function renderShipSelect(el) {
-  el.innerHTML = Object.entries(SHIPS).map(([k, s]) => `
-    <div class="ship-card ${k === S.ship ? 'sel' : ''} ${S.flags.ships[k] ? '' : 'off'}" data-ship="${k}">
-      <div class="nm">${esc(s.name)}${S.flags.ships[k] ? '' : ' <span class="grounded">Grounded</span>'}</div><div class="rl">${esc(s.role)}</div>
+  const mission = S.room?.missionId;
+  el.innerHTML = Object.entries(SHIPS).filter(([k]) => S.flags.ships[k] !== undefined || !SHIPS[k].custom).map(([k, s]) => {
+    const cleared = !mission || shipAllowedIn(k, mission);
+    return `
+    <div class="ship-card ${k === S.ship ? 'sel' : ''} ${S.flags.ships[k] ? '' : 'off'} ${cleared ? '' : 'notcleared'}" data-ship="${k}">
+      <div class="nm">${esc(s.name)}${s.custom ? '<span class="custom-tag">NEW</span>' : ''}${S.flags.ships[k] ? '' : ' <span class="grounded">Grounded</span>'}</div><div class="rl">${esc(s.role)}${cleared ? '' : '<span class="cleared">Not cleared for this mission</span>'}</div>
       <div class="st"><span>SPD</span>${pips(s.stats.speed)}<span>ARM</span>${pips(s.stats.armor)}<span>FPW</span>${pips(s.stats.firepower)}<span>HDL</span>${pips(s.stats.handling)}</div>
-    </div>`).join('') + `<div class="ship-desc" style="grid-column:1/-1">${esc(SHIPS[S.ship].desc)}</div>`;
+    </div>`;
+  }).join('') + `<div class="ship-desc" style="grid-column:1/-1">${esc(SHIPS[S.ship]?.desc || '')}</div>`;
   el.querySelectorAll('.ship-card').forEach((c) => c.addEventListener('click', () => selectShip(c.dataset.ship)));
 }
 function selectShip(k) {
   if (!S.flags.ships[k]) { toast(`The ${SHIPS[k].name} is grounded right now.`); return; }
+  if (S.room && !shipAllowedIn(k, S.room.missionId)) { toast(`The ${SHIPS[k].name} isn't cleared for this mission.`); return; }
   S.ship = k;
   localStorage.setItem('vw_ship', k);
   sfx.init(); sfx.ui();
@@ -139,15 +168,16 @@ $('name').value = S.name;
 $('name').addEventListener('change', () => {
   S.name = $('name').value.trim().slice(0, 16);
   localStorage.setItem('vw_name', S.name);
-  net.send({ t: 'hello', name: S.name || `Pilot-${S.myId}`, ship: S.ship });
+  hello();
 });
 function ensureName() {
   S.name = $('name').value.trim().slice(0, 16) || S.name || `Pilot-${S.myId}`;
   localStorage.setItem('vw_name', S.name);
-  net.send({ t: 'hello', name: S.name, ship: S.ship });
+  hello();
 }
-$('btn-quick').onclick = () => { sfx.init(); ensureName(); net.send({ t: 'quick' }); };
-$('btn-create').onclick = () => { sfx.init(); ensureName(); net.send({ t: 'create', isPublic: true }); };
+// In admin preview mode, Quick Play and Create both open a private preview wing.
+$('btn-quick').onclick = () => { sfx.init(); ensureName(); net.send(S.preview ? { t: 'create', preview: true } : { t: 'quick' }); };
+$('btn-create').onclick = () => { sfx.init(); ensureName(); net.send({ t: 'create', isPublic: true, preview: S.preview }); };
 $('btn-join').onclick = () => {
   sfx.init(); ensureName();
   const code = $('join-code').value.trim().toUpperCase();
@@ -169,18 +199,19 @@ function openTab(id) {
   document.querySelectorAll('.tabs .tab').forEach((x) => x.classList.toggle('on', x.dataset.tab === id));
   document.querySelectorAll('.info-card .tab-body').forEach((b) => b.classList.toggle('hidden', b.id !== id));
   if (id === 'tab-rooms') refreshRooms();
+  showHangar(id === 'tab-hangar');
 }
 document.querySelector('.tabs').addEventListener('click', (e) => { const t = e.target.closest('.tab'); if (t && t.dataset.tab) openTab(t.dataset.tab); });
 
 // ---------------- feature flags (live) ----------------
-function applyGameTuning(t, live = false) {
-  applyTuning(t || {});
+function applyGameTuning(c, live = false) {
+  applyGameContent(c);   // tuning, custom ships, custom missions, terrain
   for (const o of $('diff').options) if (DIFFICULTY[o.value]) o.textContent = DIFFICULTY[o.value].label;
   renderShipSelect($('ship-select'));
   renderShipSelect($('ship-select-lobby'));
   if (S.room) renderLobby();
   if (S.game?.applyLooks) S.game.applyLooks();
-  if (live) toast('Command retuned the fleet.');
+  if (live) toast(S.preview ? 'Preview draft updated.' : 'Command updated the fleet.');
 }
 
 function applyFlags(flags, live = false) {
@@ -194,6 +225,7 @@ function applyFlags(flags, live = false) {
   renderShipSelect($('ship-select-lobby'));
   if (S.room) renderLobby();
   const ev = [];
+  for (const e of S.content?.events || []) ev.push(`🎉 ${escapeHtml(e.name)} · until ${escapeHtml(new Date(e.end).toLocaleString([], { weekday: 'short', hour: '2-digit', minute: '2-digit' }))}`);
   if (flags.doubleScore) ev.push('⚡ Double score event is live');
   if (flags.extraReserves) ev.push('🛡 +2 reserve ships per mission');
   const strip = $('event-strip');
@@ -240,9 +272,26 @@ function applyContent(c) {
   const bg = $('page-bg');
   if (st.background) { bg.style.backgroundImage = `url("${encodeURI(st.background)}")`; bg.style.setProperty('--dim', st.backgroundDim ?? 0.55); bg.classList.remove('hidden'); }
   else bg.classList.add('hidden');
-  if (st.shipModels) setShipModels(st.shipModels);
-  applyGameTuning(c.tuning);
+  S.content = c;
+  setShipModels(st.shipModels || {}, c.customShips || []);
+  setModelMarkers(c.modelMarkers);
+  setLiveries(c.liveries || []);
+  setPanoramas(c.environment?.panoramas);
+  const tx = c.environment?.planet?.textures || {};
+  setTextureOverrides(Object.fromEntries([['terrain_sand_albedo', tx.sandA], ['terrain_sand_normal', tx.sandN], ['terrain_rock_albedo', tx.rockA], ['terrain_rock_normal', tx.rockN], ['terrain_cliff_albedo', tx.cliffA], ['terrain_cliff_normal', tx.cliffN]].filter(([, v]) => v)));
+  sfx.setSounds(c.sounds);
+  if (!S.game) sfx.playMusic('menu');
+  applyGameTuning(c);
   if (c.flags) applyFlags(c.flags);
+  preloadShipModels().then(() => { if (S.screen === 'menu' || S.screen === 'lobby') setPreview(S.ship); refreshHangar(); });
+  renderHangarList();
+  renderLiveries(); renderPilot(); renderPreviewBar(c);
+  const eb = $('event-banner');
+  const anns = (c.events || []).filter((e) => e.announcement);
+  eb.innerHTML = anns.map((e) => `<div><b>${escapeHtml(e.name)}</b> · ${inlineMarkup(e.announcement)}</div>`).join('');
+  eb.classList.toggle('hidden', !anns.length);
+  $('preview-ribbon').classList.toggle('hidden', !(c.env?.preview || c.preview));
+  if (c.preview) $('preview-ribbon').textContent = 'ADMIN PREVIEW · draft content';
   if (c.env?.preview) {
     const rb = $('preview-ribbon');
     rb.textContent = `PREVIEW${c.env.branch ? ` · ${c.env.branch}` : ''}${c.env.commit ? ` · ${c.env.commit}` : ''}`;
@@ -255,7 +304,7 @@ function applyContent(c) {
   tabs.querySelectorAll('.tab.custom').forEach((t) => t.remove());
   $('custom-sections').innerHTML = '';
   $('admin-link').classList.toggle('hidden', st.showAdminLink === false);
-  const vis = { rooms: st.showOpenWings !== false, howto: st.showHowTo !== false, changelog: st.showChangelog !== false };
+  const vis = { rooms: st.showOpenWings !== false, howto: st.showHowTo !== false, changelog: st.showChangelog !== false, hangar: st.showHangar !== false };
   tabs.querySelectorAll('.tab[data-key]').forEach((t) => t.classList.toggle('hidden', !vis[t.dataset.key]));
   for (const sec of c.sections || []) {
     const b = document.createElement('button');
@@ -278,7 +327,78 @@ function applyContent(c) {
   document.querySelector('.info-card').classList.toggle('hidden', !visibleTabs.length);
   if (want) openTab(want.dataset.tab);
 }
-fetch('/api/content').then((r) => r.json()).then(applyContent).catch(() => {}).finally(() => resolveContent());
+// Content (+ the custom terrain heightmap, fetched separately and cached by version)
+const terrainCache = new Map();
+async function loadContent(live = false) {
+  const q = S.preview ? '?preview=1' : '';
+  const c = await (await fetch(`/api/content${q}`)).json();
+  if (S.preview && !c.preview) { S.preview = false; sessionStorage.removeItem('vw_preview'); }
+  const hm = c.environment?.planet?.heightmap;
+  if (hm?.v) {
+    if (!terrainCache.has(hm.v)) terrainCache.set(hm.v, fetch(`/api/terrain${q}`).then((r) => (r.ok ? r.json() : null)).catch(() => null));
+    const full = await terrainCache.get(hm.v);
+    c.environment.planet.heightmap = full;
+  }
+  applyContent(c);
+  if (live) { toast(S.preview ? 'Preview draft updated.' : 'Command updated the fleet.'); if (S.room) renderLobby(); }
+  return c;
+}
+loadContent().catch(() => {}).finally(() => resolveContent());
+
+// ---------------- pilot pass, liveries, preview mode ----------------
+function renderPilot() {
+  const c = S.content || {};
+  const forum = c.site?.forumUrl;
+  const pilot = S.me?.pilot;
+  const chip = $('pilot-chip');
+  if (pilot) chip.innerHTML = `✓ ${escapeHtml(pilot.name)} <span class="role">${{ user: 'Pilot', moderator: 'Wing Leader', admin: 'Command' }[pilot.role] || ''}</span>`;
+  show('pilot-chip', !!pilot);
+  show('pilot-signout', !!pilot);
+  $('name').disabled = !!pilot;
+  const a = $('pilot-signin');
+  if (forum && !pilot) a.href = `${forum.replace(/\/$/, '')}/game-link?return=${encodeURIComponent(location.origin + '/')}`;
+  show('pilot-signin', !!forum && !pilot);
+}
+$('pilot-signout').onclick = () => { S.pilot = ''; localStorage.removeItem('vw_pilot'); $('name').disabled = false; hello(); };
+function myRole() { return S.me?.isAdmin ? 'admin' : S.me?.pilot?.role || 'everyone'; }
+function availableLiveries() {
+  const L = S.content?.liveries || [];
+  const evL = new Set((S.content?.events || []).flatMap((e) => e.liveries || []));
+  const rank = roleRank(myRole());
+  return L.filter((l) => evL.has(l.id) || (!l.eventOnly && rank >= roleRank(l.access)));
+}
+function renderLiveries() {
+  const list = availableLiveries();
+  const all = S.content?.liveries || [];
+  show('livery-row', all.length > 0);
+  if (!all.length) return;
+  const sel = $('livery');
+  const cur = S.me?.livery ?? '';
+  sel.innerHTML = `<option value="none">Factory paint</option>${list.map((l) => `<option value="${l.id}">${escapeHtml(l.name)}${l.autoFor ? ' ★' : ''}</option>`).join('')}`;
+  sel.value = list.some((l) => l.id === cur) ? cur : 'none';
+  const locked = all.filter((l) => !list.includes(l) && !l.eventOnly);
+  $('livery-note').textContent = locked.length ? `${locked.length} more for ${[...new Set(locked.map((l) => ROLE_LABEL[l.access].toLowerCase()))].join(', ')}` : '';
+}
+$('livery').onchange = () => {
+  S.livery = $('livery').value;
+  localStorage.setItem('vw_livery', S.livery);
+  net.send({ t: 'livery', livery: S.livery });
+  setTimeout(() => setPreview(S.ship), 150);
+};
+function renderPreviewBar(c) {
+  const has = !!c.admin?.hasPreview;
+  show('preview-bar', has);
+  if (has) {
+    $('preview-toggle').checked = S.preview;
+    $('preview-when').textContent = c.admin.previewAt ? `saved ${new Date(c.admin.previewAt).toLocaleString()}` : '';
+  }
+}
+$('preview-toggle').onchange = () => {
+  S.preview = $('preview-toggle').checked;
+  sessionStorage.setItem('vw_preview', S.preview ? '1' : '0');
+  if (S.room) net.send({ t: 'leave' });
+  loadContent().then(() => toast(S.preview ? 'Preview mode on: new wings use the draft. Only admins can join them.' : 'Back to the live game.'));
+};
 
 // ---------------- lobby ----------------
 function isHost() { return S.room && S.room.hostId === S.myId; }
@@ -371,6 +491,7 @@ function endGame() {
   input.enabled = false;
   show('pause', false);
   show('click-to-fly', false);
+  sfx.playMusic('menu');
   startPreview();
 }
 function updateClickPrompt() { show('click-to-fly', !!S.game && !input.locked && $('pause').classList.contains('hidden')); }
@@ -452,8 +573,10 @@ let preview = null;
 function setPreview(k) {
   if (!preview) return;
   if (preview.ship) preview.scene.remove(preview.ship);
-  preview.ship = buildShip(k, '#4fc3ff');
-  preview.ship.scale.setScalar(k === 'hammer' ? 0.85 : k === 'lancer' ? 0.6 : k === 'warden' ? 0.7 : 1);
+  preview.ship = buildShip(k, '#4fc3ff', { livery: S.me?.livery || '' });
+  // show every ship at about the same size, whatever model it uses
+  const sz = new THREE.Box3().setFromObject(preview.ship).getSize(new THREE.Vector3());
+  preview.ship.scale.setScalar(8.5 / (Math.max(sz.x, sz.z) || 8.5));
   preview.ship.position.x = -3.5;
   preview.scene.add(preview.ship);
 }

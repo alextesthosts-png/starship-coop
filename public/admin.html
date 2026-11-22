@@ -32,10 +32,14 @@
       <div class="status" id="save-status">All changes saved</div>
       <div class="top-actions">
         <a class="btn ghost" href="/" target="_blank" rel="noopener">View site ↗</a>
-        <button class="btn primary" id="btn-save" disabled>Save changes</button>
+        <button class="btn ghost" id="btn-preview-save" title="Only admins see it in the game until you publish">Save as preview</button>
+        <button class="btn primary" id="btn-save" disabled>Save &amp; publish</button>
         <button class="btn ghost" id="btn-logout">Log out</button>
       </div>
     </header>
+    <div id="draft-bar" class="draft-bar hidden">🧪 You're editing a <b>preview draft</b> (saved <span id="draft-when"></span>). Players still see the live version.
+      <a href="/" target="_blank" rel="noopener">Fly it in the game ↗</a> (switch on "Fly with the draft")
+      <button class="mini" id="btn-draft-publish">Publish draft</button><button class="mini danger" id="btn-draft-discard">Discard draft</button></div>
     <div class="layout">
       <nav class="side" id="side">
         <button data-page="landing" class="on">Landing page</button>
@@ -45,6 +49,12 @@
         <button data-page="media">Media library</button>
         <button data-page="ships">Ships &amp; models</button>
         <button data-page="tuning">Game tuning</button>
+        <button data-page="cships">Custom ships</button>
+        <button data-page="liveries">Liveries</button>
+        <button data-page="missions">Missions</button>
+        <button data-page="envs">Environments</button>
+        <button data-page="sounds">Sounds</button>
+        <button data-page="events">Events</button>
         <button data-page="flags">Feature flags</button>
         <button data-page="health">Server health</button>
         <button data-page="settings">Settings</button>
@@ -137,11 +147,11 @@
           <p class="hint">Images and 3D models stored in your Railway bucket. Use them for the announcement banner, the menu background, section text (<code>![caption](link)</code>) and ship models.</p>
           <div class="card media-status" id="media-status"></div>
           <label class="dropzone" id="dropzone">
-            <input type="file" id="media-file" multiple accept=".png,.jpg,.jpeg,.webp,.gif,.glb,.obj,.mtl,.zip,image/png,image/jpeg,image/webp,image/gif,model/gltf-binary" />
-            <b>Drop files here</b> or click to choose<br><span class="hint">PNG, JPEG, WebP, GIF up to 10 MB · GLB models up to 40 MB · OBJ models: drop a .zip, or the .obj with its .mtl and textures, and it is converted to GLB for you</span>
+            <input type="file" id="media-file" multiple accept=".png,.jpg,.jpeg,.webp,.gif,.glb,.obj,.mtl,.zip,.mp3,.ogg,.wav,.m4a,audio/*,image/png,image/jpeg,image/webp,image/gif,model/gltf-binary" />
+            <b>Drop files here</b> or click to choose<br><span class="hint">PNG, JPEG, WebP, GIF up to 10 MB · GLB models up to 40 MB · MP3/OGG/WAV/M4A sounds up to 15 MB · OBJ models: drop a .zip, or the .obj with its .mtl and textures, and it is converted to GLB for you</span>
           </label>
           <div id="uploads"></div>
-          <div class="media-tools"><div class="seg" id="media-filter"><button data-f="all" class="on">All</button><button data-f="image">Images</button><button data-f="model">Models</button></div>
+          <div class="media-tools"><div class="seg" id="media-filter"><button data-f="all" class="on">All</button><button data-f="image">Images</button><button data-f="model">Models</button><button data-f="sound">Sounds</button></div>
             <input id="media-search" placeholder="Filter by name" /><button class="btn small ghost" id="btn-resync" title="Re-read the bucket">Re-scan bucket</button></div>
           <div class="media-grid" id="media-grid"></div>
         </div>
@@ -162,6 +172,43 @@
         </div>
 
         <!-- Feature flags -->
+        <div class="page hidden" id="p-cships">
+          <div class="page-head-row"><h2>Custom ships</h2><button class="btn small" id="cs-add">+ New ship</button></div>
+          <p class="hint">Add new playable ships next to the Lancer, Warden and Hammer. A new ship flies and fires like the built-in ship it's based on, with your own name, model, numbers and secondary weapon. Switch it on and it shows up in ship select and the lobby for everyone. Limit it to certain missions if you like.</p>
+          <div id="cs-list"></div>
+        </div>
+
+        <div class="page hidden" id="p-liveries">
+          <div class="page-head-row"><h2>Liveries &amp; emblems</h2><button class="btn small" id="lv-add">+ New livery</button></div>
+          <p class="hint">Paint schemes and squadron emblems players pick under the ship select. Lock a livery to a forum role (Pilots, Wing Leaders, Command), or give it automatically to everyone in that role. Emblems go on the hull spot you mark in the <b>Markers</b> editor, or on top of the hull if there's none. Ships that keep their own look (…Baked materials) only take the emblem.</p>
+          <div id="lv-link" class="card small-card"></div>
+          <div class="lv-wrap"><div id="lv-list"></div><div class="card lv-preview"><div class="row-between"><b>Preview</b><select id="lv-ship"></select></div><div class="viewer small" id="lv-viewer"></div></div></div>
+        </div>
+
+        <div class="page hidden" id="p-missions">
+          <div class="page-head-row"><h2>Mission editor</h2><button class="btn small" id="ms-add">+ New mission</button></div>
+          <p class="hint">Build new missions on a map: where pilots start, relay towers to defend, turrets, enemy waves and a convoy route, then set objectives, a time limit and bonus goals. Missions you switch on appear in the lobby. Set one to "event only" to run it as a limited mission from the <b>Events</b> page.</p>
+          <div class="ms-layout"><div id="ms-list" class="ms-list"></div><div id="ms-editor"></div></div>
+        </div>
+
+        <div class="page hidden" id="p-envs">
+          <h2>Environments</h2>
+          <p class="hint">Change the worlds without code. Space missions can use a panorama backdrop (an equirectangular image, 2:1, such as 4096×2048). The planet can take your own terrain textures and a heightmap that reshapes the land.</p>
+          <div id="env-body"></div>
+        </div>
+
+        <div class="page hidden" id="p-sounds">
+          <h2>Sounds &amp; music</h2>
+          <p class="hint">Upload MP3, OGG, WAV or M4A files in the Media library, then pick them here. Anything you leave on "Built-in" keeps the game's synthesized sound. Music loops; the menu track starts on the player's first click.</p>
+          <div id="snd-body"></div>
+        </div>
+
+        <div class="page hidden" id="p-events">
+          <div class="page-head-row"><h2>Scheduled events</h2><button class="btn small" id="ev-add">+ New event</button></div>
+          <p class="hint">Events switch things on and off by themselves between a start and an end time: a double-score weekend, a seasonal livery, a limited mission. The server checks every few seconds, so nothing needs to be saved at the start or end. A manual override on the Feature flags page still wins.</p>
+          <div id="ev-list"></div>
+        </div>
+
         <div class="page hidden" id="p-tuning">
           <div class="page-head-row"><h2>Game tuning</h2>
             <div class="tune-tools"><input id="tune-search" type="search" placeholder="Search settings…"><label class="chk"><input type="checkbox" id="tune-changed"> Changed only</label><button class="mini danger" id="tune-reset-all">Reset all</button></div></div>
@@ -211,6 +258,7 @@
               <label class="switch"><input type="checkbox" data-bind="settings.showOpenWings" /> <span>Show “Open Wings”</span></label>
               <label class="switch"><input type="checkbox" data-bind="settings.showHowTo" /> <span>Show “How to Play”</span></label>
               <label class="switch"><input type="checkbox" data-bind="settings.showChangelog" /> <span>Show “Changelog”</span></label>
+              <label class="switch"><input type="checkbox" data-bind="settings.showHangar" /> <span>Show “Hangar” (3D gallery of ships and enemies)</span></label>
               <label class="switch"><input type="checkbox" data-bind="settings.showAdminLink" /> <span>Show “Admin” button on the main page</span></label>
               <label class="fld"><span>Tab opened by default</span><select data-bind="settings.defaultTab" id="default-tab"></select></label>
             </div>
@@ -251,5 +299,6 @@
   <div id="toast"></div>
   <script type="module" src="/js/admin.js"></script>
   <script type="module" src="/js/admin-ext.js"></script>
+  <script type="module" src="/js/admin-studio.js"></script>
 </body>
 </html>

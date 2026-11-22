@@ -39,6 +39,9 @@ Deploys on Railway as-is (`npm start`, listens on `$PORT`, health check `/health
 - **Two services** in one project: `vanguard-wing` (Node game server) and `vanguard-forum` (PHP + SQLite, built from `forum/`).
 - **Volumes:** `/data` on each service (admin content, flags, metrics history; forum database and sessions).
 - **Bucket** `vanguard-media`: admin media library (images, GLB ship models) served same-origin at `/media/…`.
+- **Studio (v2.0):** `shared/gamecontent.js` validates and applies admin-made content on both the server and the browser: custom ships, custom missions (run by `SCRIPTS.custom` in `server/sim.js`), liveries, model markers, environments (panoramas, terrain textures, heightmaps), sounds and scheduled events. The admin pages live in `public/js/admin-studio.js`, `admin-pages.js` and `admin-missions.js`.
+- **Preview drafts:** `/data/preview.json` holds a draft only signed-in admins see. Preview wings run their simulation with the draft swapped in (`inContext()` in `server/index.js`), so balance changes can be flown without touching live players.
+- **Forum pilot pass:** the forum's `/game-link` signs `{callsign, role, expiry}` with `GAME_LINK_SECRET` (set the same value on both services); the game verifies it to unlock role-locked liveries.
 - **Custom models:** every slot in `MODEL_SLOTS` (`shared/config.js`) can use a GLB from the media bucket; `public/js/models.js` fits it to the built-in size. `.obj` packages are converted to GLB in the browser (`public/js/obj-convert.js`), so the game only ever loads GLB.
 - **Game tuning:** `shared/tuning.js` lists every live-tunable value (ships, weapons, enemies, difficulty, mission texts, colours, camera, skies). Overrides are saved with the site content on the `/data` volume and pushed to every open game over the WebSocket, so balance and looks change without a redeploy.
 - **Feature flags:** `vw.mission.*`, `vw.ship.*`, `vw.event.*`, read with the `railway` SDK when `RAILWAY_TOKEN`
